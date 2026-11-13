@@ -638,6 +638,41 @@
                   </div>
                 </div>
 
+                <!-- Rincian Stok Titipan (Konsinyasi) di Apotek Ini: Barang Laku vs Lama Tidak Laku & Alarm Pink Expired -->
+                <div class="flex flex-col gap-2">
+                  <div class="flex items-center justify-between">
+                    <span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider font-semibold text-[11px]">
+                      Stok Titipan (Konsinyasi) di Apotek Ini
+                    </span>
+                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary/10 text-primary">
+                      ${selectedOutlet.terms}
+                    </span>
+                  </div>
+                  <div class="space-y-1.5">
+                    ${(selectedOutlet.consignmentItems || []).map(function (ci) {
+                      var isSlow = ci.velocity === 'LAMA_TIDAK_LAKU';
+                      var isPink = ci.nearExpiry;
+                      return `
+                        <div class="p-2.5 rounded-lg border text-xs flex flex-col gap-1" style="background:${isPink ? '#fdf2f8' : 'var(--color-surface-container-low)'}; border-color:${isPink ? '#f472b6' : 'var(--color-border-subtle)'};">
+                          <div class="flex items-center justify-between gap-1">
+                            <span class="font-bold text-on-surface truncate">${ci.name}</span>
+                            <div class="flex items-center gap-1 shrink-0">
+                              ${isPink ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold" style="background:#db2777; color:#fff;">🩷 Hampir ED</span>` : ''}
+                              <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${isSlow ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-800'}">
+                                ${isSlow ? 'Lama Tak Laku' : 'Laris'}
+                              </span>
+                            </div>
+                          </div>
+                          <div class="flex items-center justify-between text-[11px] text-on-surface-variant">
+                            <span>Titip: <b>${ci.consignedQty}</b> · Laku: <b class="text-emerald-700">${ci.soldQty}</b> · Sisa di Apotek: <b class="text-on-surface">${ci.remainingQty}</b></span>
+                            <span>ED: <b style="${isPink ? 'color:#be185d;' : ''}">${ci.expiry}</b></span>
+                          </div>
+                        </div>
+                      `;
+                    }).join('')}
+                  </div>
+                </div>
+
                 <!-- Catatan Kunjungan Terakhir (Field Log) -->
                 <div class="flex flex-col gap-2">
                   <div class="flex items-center justify-between">

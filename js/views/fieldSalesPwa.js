@@ -24,7 +24,7 @@
       'SKU-ARB-MDR500': 6,
       'SKU-ARB-HBT100': 4
     },
-    selectedTerm: 'Net 30 Hari',
+    selectedTerm: 'Konsinyasi (Titip Jual)',
     orderNotes: '',
     isSubmitting: false,
     gpsCheckedIn: true,
@@ -81,6 +81,7 @@
         (state.activeCategory === 'madu' && prod.category === 'Madu Herbal') ||
         (state.activeCategory === 'kapsul' && prod.category === 'Kapsul Herbal') ||
         (state.activeCategory === 'minyak' && prod.category === 'Minyak & Cairan') ||
+        (state.activeCategory === 'kosmetik' && prod.category === 'Kosmetik Herbal') ||
         (state.activeCategory === 'serbuk' && prod.category === 'Serbuk');
 
       var matchesSearch =
@@ -101,8 +102,8 @@
       return sum + (prod ? prod.unitPrice * qty : 0);
     }, 0);
 
-    // Validasi plafon kredit outlet (termin non-COD)
-    var isCreditTerm = !/COD|Tunai/i.test(state.selectedTerm);
+    // Validasi plafon kredit outlet (hanya untuk termin Jatuh Tempo non-Konsinyasi & non-COD)
+    var isCreditTerm = /Net|Jatuh Tempo/i.test(state.selectedTerm);
     var overCredit = isCreditTerm && totalAmount > (currentOutlet.creditRemaining || 0);
 
     var html = `
@@ -249,33 +250,45 @@
                   }).join('')}
                 </select>
 
-                <!-- Outlet Metadata at a glance -->
+                <!-- Outlet Metadata & Status Konsinyasi (Apotek Pasif >90% Titip Jual) -->
                 <div class="flex items-center justify-between text-xs text-slate-600 pt-1 border-t border-slate-200/60" style="border-top:1px solid #e2e8f0; padding-top:0.35rem;">
                   <div class="truncate max-w-[200px]">
                     <span>PIC: <b>${currentOutlet.picName}</b></span>
                     <span class="text-slate-400 mx-1">·</span>
-                    <span class="text-[11px] text-slate-500">${currentOutlet.cityName}</span>
+                    <span class="text-[11px] font-semibold text-teal-800">${currentOutlet.terms}</span>
                   </div>
                   <div class="text-right">
-                    <span class="text-[10px] text-slate-500 block">Sisa Plafon</span>
-                    <span class="font-semibold text-emerald-700 text-xs">
-                      ${window.ArbaUtils.formatRupiah(currentOutlet.creditRemaining)}
+                    <span class="text-[10px] text-slate-500 block">Tagihan Barang Laku</span>
+                    <span class="font-bold text-emerald-700 text-xs">
+                      ${window.ArbaUtils.formatRupiah(currentOutlet.consignmentBillableAmount || 0)}
                     </span>
                   </div>
                 </div>
 
-                <!-- Quick Actions: Repeat Order & Visit-only (canvassing) -->
+                <!-- Ringkasan Stok Titipan di Apotek Ini & Alarm Pink Expired -->
+                ${(currentOutlet.consignmentItems && currentOutlet.consignmentItems.length > 0) ? `
+                  <div class="p-2 rounded-lg text-[11px] space-y-1" style="background:#fdf2f8; border:1px solid #f472b6; color:#831843; margin-top:0.35rem;">
+                    <div class="font-bold flex items-center justify-between">
+                      <span>📦 Stok Titipan di Apotek: ${currentOutlet.consignmentTotalUnits || 0} unit</span>
+                      <span>Laku: ${currentOutlet.consignmentItems.reduce(function (s, c) { return s + c.soldQty; }, 0)} unit</span>
+                    </div>
+                    ${currentOutlet.consignmentItems.filter(function (c) { return c.nearExpiry; }).map(function (c) {
+                      return `<div class="text-[10px] font-semibold" style="color:#be185d;">🩷 Alarm Pink: <b>${c.name}</b> (${c.remainingQty} btl, ED ${c.expiry}) — Minta apotek jual dulu!</div>`;
+                    }).join('')}
+                  </div>
+                ` : ''}
+
+                <!-- Quick Actions: Tagih & Isi Ulang Konsinyasi (1-Tap) & Kunjungan Tanpa Order -->
                 <div class="flex gap-2" style="display:flex; gap:0.5rem; margin-top:0.5rem;">
                   <button
                     type="button"
                     id="btn-pwa-repeat-order"
                     class="flex-1 flex items-center justify-center gap-1 py-2 rounded-lg text-[11px] font-semibold cursor-pointer border-0"
                     style="flex:1; background:#e0f2fe; color:#075985; border-radius:8px; padding:0.5rem;"
-                    ${lastOutletOrder ? '' : 'disabled'}
-                    title="${lastOutletOrder ? 'Isi keranjang dengan pesanan terakhir outlet ini' : 'Belum ada riwayat order outlet ini'}"
+                    title="Otomatis isi jumlah barang konsinyasi yang laku terjual di apotek ini untuk ditagih & diganti stok baru"
                   >
-                    <span class="material-symbols-outlined text-[15px]">replay</span>
-                    <span>Ulangi Order Terakhir</span>
+                    <span class="material-symbols-outlined text-[15px]">sync_saved_locally</span>
+                    <span>Tagih Laku &amp; Isi Ulang</span>
                   </button>
                   <button
                     type="button"
@@ -284,7 +297,7 @@
                     style="flex:1; background:#f1f5f9; color:#334155; border-radius:8px; padding:0.5rem;"
                   >
                     <span class="material-symbols-outlined text-[15px]">where_to_vote</span>
-                    <span>Kunjungan Tanpa Order</span>
+                    <span>Cek / Tanpa Nota</span>
                   </button>
                 </div>
               </div>
@@ -306,7 +319,8 @@
                     { id: 'all', label: 'Semua' },
                     { id: 'madu', label: 'Madu' },
                     { id: 'kapsul', label: 'Kapsul' },
-                    { id: 'minyak', label: 'Minyak' }
+                    { id: 'minyak', label: 'Minyak' },
+                    { id: 'kosmetik', label: 'Kosmetik' }
                   ].map(function (cat) {
                     var isCatActive = state.activeCategory === cat.id;
                     return `
@@ -347,6 +361,7 @@
                     var qty = state.cart[prod.sku] || 0;
                     var isLow = prod.stock <= prod.rop;
                     var atMax = qty >= prod.stock;
+                    var consItem = (currentOutlet.consignmentItems || []).find(function (c) { return c.sku === prod.sku; });
 
                     return `
                       <div
@@ -366,15 +381,20 @@
                               ${window.ArbaUtils.formatRupiah(prod.unitPrice)}
                             </span>
                             <span>·</span>
-                            <span class="font-mono text-slate-500">Stok: ${prod.stock}</span>
+                            <span class="font-mono text-slate-500">Gudang: ${prod.stock}</span>
                           </div>
+                          ${consItem ? `
+                            <div class="text-[10px] font-semibold mt-0.5" style="color:${consItem.nearExpiry ? '#be185d' : '#0f766e'};">
+                              Di Apotek: Titip ${consItem.consignedQty} · Laku <b>${consItem.soldQty}</b> · Sisa ${consItem.remainingQty}${consItem.nearExpiry ? ' · 🩷 Hampir ED!' : ''}
+                            </div>
+                          ` : ''}
                           ${prod.stock === 0 ? `
                             <div class="text-[10px] font-semibold mt-0.5" style="color:#be123c;">
                               Stok gudang habis — tidak dapat dipesan
                             </div>
                           ` : isLow ? `
-                            <div class="text-[10px] text-amber-700 font-medium mt-0.5">
-                              Mendekati ROP Gudang${atMax && qty > 0 ? ' · batas stok tercapai' : ''}
+                            <div class="text-[10px] font-semibold mt-0.5" style="color:#ea580c;">
+                              🟧 Alarm Oranye: Stok Gudang &le; ROP (${prod.rop})${atMax && qty > 0 ? ' · batas stok' : ''}
                             </div>
                           ` : (atMax && qty > 0 ? `
                             <div class="text-[10px] text-amber-700 font-medium mt-0.5">Batas stok gudang tercapai</div>
@@ -414,15 +434,15 @@
               <!-- Step 3: Payment Terms & Simple Notes -->
               <div class="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-2 mb-2" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:0.75rem;">
                 <div class="flex items-center justify-between text-xs mb-1.5">
-                  <span class="font-semibold text-slate-700">Termin Faktur:</span>
+                  <span class="font-semibold text-slate-700">Skema Nota:</span>
                   <select
                     id="pwa-term-select"
                     class="bg-white px-2.5 py-1 rounded-md text-xs font-semibold text-slate-800 border border-slate-200 cursor-pointer focus:outline-none"
                     style="border:1px solid #cbd5e1;"
                   >
-                    <option value="Net 30 Hari" ${state.selectedTerm === 'Net 30 Hari' ? 'selected' : ''}>Net 30 Hari</option>
-                    <option value="Net 14 Hari" ${state.selectedTerm === 'Net 14 Hari' ? 'selected' : ''}>Net 14 Hari</option>
-                    <option value="COD Tunai" ${state.selectedTerm === 'COD Tunai' ? 'selected' : ''}>COD Tunai</option>
+                    <option value="Konsinyasi (Titip Jual)" ${state.selectedTerm === 'Konsinyasi (Titip Jual)' ? 'selected' : ''}>Konsinyasi / Titip Jual (&gt;90%)</option>
+                    <option value="Jatuh Tempo (Net 14 Hari)" ${state.selectedTerm === 'Jatuh Tempo (Net 14 Hari)' ? 'selected' : ''}>Jatuh Tempo (Net 14 Hari)</option>
+                    <option value="Cash / Tunai di Awal" ${state.selectedTerm === 'Cash / Tunai di Awal' ? 'selected' : ''}>Cash / Tunai di Awal</option>
                   </select>
                 </div>
                 <input
@@ -458,7 +478,7 @@
                 type="button"
               >
                 <span class="material-symbols-outlined text-[16px]">send</span>
-                <span>${state.isSubmitting ? 'Mengirim...' : 'Kirim Pesanan Lapangan'}</span>
+                <span>${state.isSubmitting ? 'Mengirim...' : 'Simpan Tagihan &amp; Ganti Nota Baru'}</span>
               </button>
             </div>
           </div>
@@ -488,18 +508,27 @@
       });
     }
 
-    // Repeat last order (1-tap)
+    // Tagih Laku & Isi Ulang Konsinyasi (1-tap)
     var btnRepeat = container.querySelector('#btn-pwa-repeat-order');
-    if (btnRepeat && ctx.lastOutletOrder) {
+    if (btnRepeat) {
       btnRepeat.addEventListener('click', function () {
         var newCart = {};
-        ctx.lastOutletOrder.items.forEach(function (it) {
-          var norm = String(it.sku).toUpperCase().replace(/SKU-|ARB-|-/g, '');
-          var prod = products.find(function (p) { return p.sku.toUpperCase().replace(/SKU-|ARB-|-/g, '') === norm; });
-          if (prod && prod.stock > 0) newCart[prod.sku] = Math.min(it.quantity, prod.stock);
-        });
+        if (currentOutlet.consignmentItems && currentOutlet.consignmentItems.length > 0) {
+          currentOutlet.consignmentItems.forEach(function (ci) {
+            var prod = products.find(function (p) { return p.sku === ci.sku; });
+            if (prod && prod.stock > 0 && ci.soldQty > 0) {
+              newCart[prod.sku] = Math.min(ci.soldQty, prod.stock);
+            }
+          });
+        } else if (ctx.lastOutletOrder) {
+          ctx.lastOutletOrder.items.forEach(function (it) {
+            var norm = String(it.sku).toUpperCase().replace(/SKU-|ARB-|-/g, '');
+            var prod = products.find(function (p) { return p.sku.toUpperCase().replace(/SKU-|ARB-|-/g, '') === norm; });
+            if (prod && prod.stock > 0) newCart[prod.sku] = Math.min(it.quantity, prod.stock);
+          });
+        }
         state.cart = newCart;
-        window.ArbaApp.showToast('Keranjang diisi dari order terakhir ' + currentOutlet.name, 'replay');
+        window.ArbaApp.showToast('Keranjang diisi sesuai barang konsinyasi yang terjual di ' + currentOutlet.name, 'sync_saved_locally');
         renderFieldSalesPwa(container);
       });
     }

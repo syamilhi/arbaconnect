@@ -4,7 +4,7 @@
  */
 
 window.ArbaStore = (function() {
-  const STORAGE_KEY = 'arbaconnect_erp_state_v3';
+  const STORAGE_KEY = 'arbaconnect_erp_state_v4';
 
   // Load from local storage or fallback to ArbaData initial values
   function loadInitialState() {
@@ -51,6 +51,7 @@ window.ArbaStore = (function() {
           salesVisits: parsed.salesVisits || ArbaData.salesVisits,
           driverManifests: parsed.driverManifests || ArbaData.driverManifests,
           salesTeam: parsed.salesTeam || JSON.parse(JSON.stringify(ArbaData.salesTeam)),
+          salesLoadings: parsed.salesLoadings || JSON.parse(JSON.stringify(ArbaData.salesLoadings)),
           visitLogs: parsed.visitLogs || JSON.parse(JSON.stringify(ArbaData.visitLogs)),
           currentSalesRep: parsed.currentSalesRep || 'Budi Santoso',
           offlineQueue: parsed.offlineQueue || []
@@ -75,6 +76,7 @@ window.ArbaStore = (function() {
       salesVisits: JSON.parse(JSON.stringify(ArbaData.salesVisits)),
       driverManifests: JSON.parse(JSON.stringify(ArbaData.driverManifests)),
       salesTeam: JSON.parse(JSON.stringify(ArbaData.salesTeam)),
+      salesLoadings: JSON.parse(JSON.stringify(ArbaData.salesLoadings)),
       visitLogs: JSON.parse(JSON.stringify(ArbaData.visitLogs)),
       currentSalesRep: 'Budi Santoso',
       offlineQueue: []
@@ -102,6 +104,7 @@ window.ArbaStore = (function() {
         salesVisits: state.salesVisits,
         driverManifests: state.driverManifests,
         salesTeam: state.salesTeam,
+        salesLoadings: state.salesLoadings,
         visitLogs: state.visitLogs,
         currentSalesRep: state.currentSalesRep,
         offlineQueue: state.offlineQueue
@@ -671,11 +674,55 @@ window.ArbaStore = (function() {
       state.offlineQueue = [{ id: orderObj.id, createdAt: Date.now() }, ...state.offlineQueue];
     }
 
-    // 2) Kredit outlet & riwayat transaksi CRM
+    // 2) Kredit outlet, stok titipan konsinyasi di apotek & barang bawaan sales
     applyOutletCredit(orderObj, 1);
     if (outlet) {
       outlet.lastOrderDate = todayLabel();
       outlet.ytdTotal = (outlet.ytdTotal || 0) + totalAmount;
+      if (!Array.isArray(outlet.consignmentItems)) outlet.consignmentItems = [];
+      items.forEach(it => {
+        const prod = findProduct(it.sku, it.name);
+        const fullSku = prod ? prod.sku : it.sku;
+        const existingC = outlet.consignmentItems.find(c => c.sku === fullSku);
+        if (existingC) {
+          existingC.soldQty = (existingC.soldQty || 0) + (it.soldAtOutlet || it.quantity);
+          existingC.remainingQty = Math.max(0, (existingC.remainingQty || 0) + it.quantity - (it.soldAtOutlet || it.quantity));
+          existingC.consignedQty = existingC.soldQty + existingC.remainingQty;
+          existingC.velocity = 'LARIS';
+          existingC.daysInOutlet = 1;
+        } else if (prod) {
+          outlet.consignmentItems.push({
+            sku: prod.sku,
+            name: prod.name,
+            batch: prod.activeBatch,
+            expiry: prod.fefoDate,
+            consignedQty: it.quantity,
+            soldQty: it.quantity,
+            remainingQty: it.quantity,
+            unitPrice: prod.unitPrice,
+            velocity: 'LARIS',
+            daysInOutlet: 1,
+            nearExpiry: /Kritis|Mendekati/.test(prod.fefoStatus || '')
+          });
+        }
+      });
+      outlet.consignmentTotalUnits = outlet.consignmentItems.reduce((s, c) => s + (c.remainingQty || 0), 0);
+      outlet.consignmentBillableAmount = outlet.consignmentItems.reduce((s, c) => s + (c.soldQty || 0) * c.unitPrice, 0);
+    }
+
+    // Kurangi stok bawaan di mobil/tas sales (Canvas Loading Control)
+    const activeLoad = (state.salesLoadings || []).find(l => l.salesRep === orderObj.salesRep);
+    if (activeLoad) {
+      activeLoad.cashCollected = (activeLoad.cashCollected || 0) + totalAmount;
+      items.forEach(it => {
+        const prod = findProduct(it.sku, it.name);
+        const fullSku = prod ? prod.sku : it.sku;
+        const loadItem = activeLoad.items.find(li => li.sku === fullSku);
+        if (loadItem) {
+          loadItem.droppedQty = (loadItem.droppedQty || 0) + it.quantity;
+          loadItem.returnedQty = Math.max(0, loadItem.loadedQty - loadItem.droppedQty - (loadItem.discrepancy || 0));
+        }
+      });
     }
 
     state.orders = [orderObj, ...state.orders];
@@ -753,6 +800,83 @@ window.ArbaStore = (function() {
 
   function setCurrentSalesRep(name) {
     state.currentSalesRep = name;
+    notify();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Kontrol Barang Bawaan Sales dari Gudang (Ambil Pagi vs Kembali Sore — Anti-Fraud)
+  // Sesuai wawancara CV Arba'in:
+  // "Seandainya sales kita nakal, bawa dari gudang itu 15, yang 3 dijual kantong
+  //  sendiri, yang 12 masuk kantor, kita enggak tahu... Mulai nyatatnya saat sales
+  //  ngambil dari warehouse, dan saat kembali dicatat pengembaliannya."
+  // ---------------------------------------------------------------------------
+  function recordSalesWarehouseLoad({ salesRep, sku, loadedQty }) {
+    const prod = findProduct(sku);
+    const rep = state.salesTeam.find(s => s.name === salesRep) || state.salesTeam[0];
+    const qty = Number(loadedQty) || 0;
+    if (!prod || qty <= 0) return;
+
+    let loadRec = state.salesLoadings.find(l => l.salesRep === rep.name);
+    if (!loadRec) {
+      loadRec = {
+        id: `LOAD-2026-${Math.floor(100 + Math.random() * 900)}`,
+        date: `Hari ini • ${pad2(new Date().getHours())}:${pad2(new Date().getMinutes())} WIB`,
+        salesRep: rep.name,
+        salesRepId: rep.id,
+        division: rep.division || 'Madu & Herbal',
+        routeArea: `${rep.area} (Target ${rep.dailyVisitTarget} Outlet)`,
+        status: 'SEDANG_KELILING',
+        cashCollected: 0,
+        items: []
+      };
+      state.salesLoadings = [loadRec, ...state.salesLoadings];
+    }
+
+    const existingItem = loadRec.items.find(i => i.sku === prod.sku);
+    if (existingItem) {
+      existingItem.loadedQty += qty;
+      existingItem.returnedQty += qty;
+    } else {
+      loadRec.items.push({
+        sku: prod.sku,
+        name: prod.name,
+        batch: prod.activeBatch,
+        loadedQty: qty,
+        droppedQty: 0,
+        returnedQty: qty,
+        discrepancy: 0,
+        unitPrice: prod.unitPrice
+      });
+    }
+
+    showToast(`Tercatat: ${rep.name} membawa ${qty} unit ${prod.name} dari gudang.`, 'local_shipping');
+    notify();
+  }
+
+  function reconcileSalesLoading(loadId, actualReturnedMap) {
+    const loadRec = state.salesLoadings.find(l => l.id === loadId);
+    if (!loadRec) return;
+
+    let totalDiscrepancy = 0;
+    loadRec.items.forEach(it => {
+      const expectedReturn = Math.max(0, it.loadedQty - it.droppedQty);
+      const actualReturn = actualReturnedMap && actualReturnedMap[it.sku] !== undefined
+        ? Number(actualReturnedMap[it.sku])
+        : expectedReturn;
+      it.returnedQty = actualReturn;
+      it.discrepancy = Math.max(0, expectedReturn - actualReturn);
+      totalDiscrepancy += it.discrepancy;
+    });
+
+    if (totalDiscrepancy === 0) {
+      loadRec.status = 'TERVERIFIKASI_KLOP';
+      loadRec.auditNote = undefined;
+      showToast(`Rekonsiliasi ${loadRec.salesRep} KLOP 100%! Tidak ada selisih barang bawaan.`, 'verified');
+    } else {
+      loadRec.status = 'SELISIH_AUDIT';
+      loadRec.auditNote = `Terdeteksi selisih ${totalDiscrepancy} unit belum kembali ke gudang (wajib ditagihkan ke sales)!`;
+      showToast(`PERINGATAN AUDIT: Selisih ${totalDiscrepancy} unit pada bawaan ${loadRec.salesRep}!`, 'warning');
+    }
     notify();
   }
 
@@ -973,6 +1097,106 @@ window.ArbaStore = (function() {
     const belowRop = state.products.filter(p => p.stock <= p.rop);
     const nearExpiry = state.products.filter(p => /Kritis|Mendekati/.test(p.fefoStatus || ''));
 
+    // 1) ALARM ORANYE (Permintaan Mitra CV Arba'in: Alarm Stok Menipis dengan ambang berbeda sesuai tonase)
+    const orangeStockAlarms = belowRop.map(p => ({
+      sku: p.sku,
+      name: p.name,
+      stock: p.stock,
+      rop: p.rop,
+      shortage: Math.max(0, p.rop - p.stock),
+      consumptionNote: p.monthlyConsumptionNote || p.ropFormula,
+      color: 'ORANGE'
+    }));
+
+    // 2) ALARM PINK (Permintaan Mitra CV Arba'in: Alarm Produk Mendekati Expired di Gudang & di Apotek Mitra)
+    const pinkExpiryAlarms = [];
+    nearExpiry.forEach(p => {
+      pinkExpiryAlarms.push({
+        locationType: 'GUDANG_UTAMA',
+        locationName: 'Gudang Utama Kartasura',
+        salesRep: 'Admin Gudang',
+        sku: p.sku,
+        productName: p.name,
+        batch: p.activeBatch,
+        expiry: p.fefoDate,
+        qty: p.stock,
+        statusLabel: p.fefoStatus,
+        color: 'PINK'
+      });
+    });
+    state.outlets.forEach(o => {
+      (o.consignmentItems || []).forEach(ci => {
+        if (ci.nearExpiry && ci.remainingQty > 0) {
+          pinkExpiryAlarms.push({
+            locationType: 'APOTEK_MITRA',
+            locationName: o.name,
+            outletId: o.id,
+            city: o.cityName,
+            salesRep: o.salesRep,
+            picPhone: o.picPhone,
+            sku: ci.sku,
+            productName: ci.name,
+            batch: ci.batch,
+            expiry: ci.expiry,
+            qty: ci.remainingQty,
+            statusLabel: `Stok Titipan Apotek (${ci.daysInOutlet} hari)`,
+            color: 'PINK'
+          });
+        }
+      });
+    });
+
+    // 3) Stok Titipan di Apotek: Yang Laku Keras vs Yang Lama Tidak Laku (Slow-Moving)
+    const outletSlowMoving = [];
+    state.outlets.forEach(o => {
+      (o.consignmentItems || []).forEach(ci => {
+        if (ci.velocity === 'LAMA_TIDAK_LAKU' && ci.remainingQty > 0) {
+          outletSlowMoving.push({
+            outletId: o.id,
+            outletName: o.name,
+            city: o.cityName,
+            salesRep: o.salesRep,
+            sku: ci.sku,
+            productName: ci.name,
+            batch: ci.batch,
+            expiry: ci.expiry,
+            consignedQty: ci.consignedQty,
+            soldQty: ci.soldQty,
+            remainingQty: ci.remainingQty,
+            daysInOutlet: ci.daysInOutlet
+          });
+        }
+      });
+    });
+
+    // 4) Tren Produk Paling Laku Keras & Perkiraan (Forecasting) Produksi Bulan Depan (Pilar ke-6 CV Arba'in)
+    const productForecasting = state.products.map(p => {
+      const liveSold = activeOrders.reduce((s, ord) => {
+        return s + (ord.items || []).filter(it => normalizeSku(it.sku) === normalizeSku(p.sku)).reduce((a, b) => a + b.quantity, 0);
+      }, 0);
+      const soldMonth = (p.monthlySoldUnits || 800) + liveSold;
+      const forecastUnits = Math.max(p.forecastNextMonthUnits || Math.round(soldMonth * 1.12), soldMonth);
+      const productionNeeded = Math.max(0, forecastUnits + p.safetyStock - p.stock);
+      return {
+        sku: p.sku,
+        name: p.name,
+        category: p.category,
+        division: p.division || 'Madu & Herbal',
+        stock: p.stock,
+        rop: p.rop,
+        soldMonth,
+        forecastUnits,
+        productionNeeded,
+        consumptionNote: p.monthlyConsumptionNote || `${soldMonth} unit/bln`
+      };
+    }).sort((a, b) => b.soldMonth - a.soldMonth);
+
+    // 5) Ringkasan Kontrol Barang Bawaan Sales (Anti-Fraud)
+    const salesLoadings = state.salesLoadings || [];
+    const totalDiscrepancyUnits = salesLoadings.reduce((s, l) => {
+      return s + (l.items || []).reduce((a, it) => a + (it.discrepancy || 0), 0);
+    }, 0);
+
     return {
       revenueMonth,
       revenueTarget,
@@ -995,6 +1219,12 @@ window.ArbaStore = (function() {
       stockTurnover,
       belowRop,
       nearExpiry,
+      orangeStockAlarms,
+      pinkExpiryAlarms,
+      outletSlowMoving,
+      productForecasting,
+      salesLoadings,
+      totalDiscrepancyUnits,
       criticalSkuCount: new Set(belowRop.concat(nearExpiry).map(p => p.sku)).size,
       pendingOrders: state.orders.filter(o => o.status === 'PENDING').length,
       waitingStockOrders: state.orders.filter(o => o.status === 'PENDING' && o.syncStatus === 'PENDING_WAREHOUSE').length
@@ -1036,6 +1266,8 @@ window.ArbaStore = (function() {
     submitFieldSalesOrder,
     logFieldVisit,
     setCurrentSalesRep,
+    recordSalesWarehouseLoad,
+    reconcileSalesLoading,
     checkStockAvailability,
     importOutlets,
     importProducts,

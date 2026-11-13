@@ -494,6 +494,103 @@
           </div>
         </div>
 
+        <!-- Section 2A: Pusat 6 Pilar CV Arba'in & Sistem Alarm Dual-Warna (Oranye = Stok Menipis, Pink = Mendekati Expired di Gudang & Apotek) -->
+        <div class="bg-surface-container-lowest p-space-lg rounded-xl shadow-xs border border-border-subtle/40 flex flex-col gap-4">
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-2 pb-2 border-b border-border-subtle/50">
+            <div>
+              <span class="font-label-sm text-label-sm uppercase tracking-wider text-primary font-bold">
+                Hasil Penyelarasan Wawancara Mitra CV Arba'in (6 Fokus Utama)
+              </span>
+              <h2 class="font-title-sm text-title-sm text-on-surface font-bold">
+                1. Produk Batch · 2. Stok Gudang · 3. Outlet (&gt;1.000 Konsinyasi) · 4. Kunjungan Sales · 5. Penjualan &amp; Tagihan · 6. Perkiraan Produksi
+              </h2>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap text-[11px] font-semibold">
+              <span class="px-2.5 py-1 rounded-full" style="background:#fff7ed; color:#c2410c; border:1px solid #fb923c;">
+                🟧 Alarm Oranye: Stok Menipis (${analytics.orangeStockAlarms.length} SKU)
+              </span>
+              <span class="px-2.5 py-1 rounded-full" style="background:#fdf2f8; color:#be185d; border:1px solid #f472b6;">
+                🩷 Alarm Pink: Hampir Expired di Gudang &amp; Apotek (${analytics.pinkExpiryAlarms.length} Titik)
+              </span>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <!-- Kolom Kiri: ALARM ORANYE (Stok Menipis Dinamis Sesuai Tonase / Kecepatan Habis) -->
+            <div class="rounded-xl p-4 flex flex-col gap-2.5" style="background:#fff7ed; border:1.5px solid #fb923c;">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span class="material-symbols-outlined text-[20px]" style="color:#ea580c;">notification_important</span>
+                  <div>
+                    <div class="font-bold text-xs" style="color:#9a3412;">ALARM ORANYE — Stok Gudang Menipis (Ambang ROP Dinamis per Tonase)</div>
+                    <div class="text-[11px]" style="color:#c2410c;">Ambang alarm berbeda tiap produk sesuai konsumsi bulanan (contoh: Madu Randu ~2 Ton vs Madu Rambutan ~1 Ton)</div>
+                  </div>
+                </div>
+              </div>
+              <div class="space-y-2">
+                ${analytics.orangeStockAlarms.map(function (al) {
+                  return `
+                    <div class="p-2.5 rounded-lg bg-white/90 flex items-center justify-between gap-2" style="border:1px solid #fdba74;">
+                      <div>
+                        <div class="font-bold text-xs text-slate-900">${al.name}</div>
+                        <div class="text-[11px] text-slate-600">Konsumsi: <b>${al.consumptionNote}</b> · Ambang ROP: <b>${al.rop} unit</b></div>
+                      </div>
+                      <div class="text-right">
+                        <div class="font-mono font-bold text-xs" style="color:#ea580c;">Sisa: ${al.stock} unit</div>
+                        <div class="text-[10px] font-semibold" style="color:#9a3412;">Kurang ${al.shortage} unit dari ROP</div>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+
+            <!-- Kolom Kanan: ALARM PINK (Produk Hampir Expired di Gudang & di Apotek Konsinyasi) -->
+            <div class="rounded-xl p-4 flex flex-col gap-2.5" style="background:#fdf2f8; border:1.5px solid #f472b6;">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span class="material-symbols-outlined text-[20px]" style="color:#db2777;">event_busy</span>
+                  <div>
+                    <div class="font-bold text-xs" style="color:#9d174d;">ALARM PINK — Produk Hampir Expired (di Gudang &amp; Titipan Apotek)</div>
+                    <div class="text-[11px]" style="color:#be185d;">Melacak posisi batch hampir ED di apotek mitra agar sales memberi tahu: <i>"Mbak, tolong yang dijual ini dulu"</i></div>
+                  </div>
+                </div>
+              </div>
+              <div class="space-y-2 max-h-56 overflow-y-auto pr-1">
+                ${analytics.pinkExpiryAlarms.slice(0, 6).map(function (pk) {
+                  var isApotek = pk.locationType === 'APOTEK_MITRA';
+                  return `
+                    <div class="p-2.5 rounded-lg bg-white/90 flex items-center justify-between gap-2" style="border:1px solid #f9a8d4;">
+                      <div>
+                        <div class="flex items-center gap-1.5">
+                          <span class="px-1.5 py-0.5 rounded text-[10px] font-bold" style="background:${isApotek ? '#fce7f3' : '#fee2e2'}; color:#9d174d;">
+                            ${isApotek ? 'DI APOTEK' : 'DI GUDANG'}
+                          </span>
+                          <span class="font-bold text-xs text-slate-900">${pk.locationName}</span>
+                        </div>
+                        <div class="text-[11px] text-slate-700 mt-0.5">
+                          <b>${pk.productName}</b> (${pk.batch}) · ED: <b style="color:#be185d;">${pk.expiry}</b> · Sisa: <b>${pk.qty} unit</b>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        class="btn-pink-alarm-notify px-2.5 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer border-0 shrink-0"
+                        style="background:#db2777; color:#fff;"
+                        data-location="${window.ArbaUtils.escapeHtml(pk.locationName)}"
+                        data-product="${window.ArbaUtils.escapeHtml(pk.productName)}"
+                        data-batch="${window.ArbaUtils.escapeHtml(pk.batch)}"
+                        data-sales="${window.ArbaUtils.escapeHtml(pk.salesRep)}"
+                      >
+                        Instruksikan Sales
+                      </button>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Section 2B: Produktivitas Tim Sales Lapangan & Perputaran Stok Produk (Sesuai Kebutuhan Tantangan ARB-02) -->
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-space-lg">
           <!-- Panel Kiri (7 Kolom): Leaderboard Produktivitas & Target Tim Sales -->
@@ -591,6 +688,84 @@
                         <span>Demand: ${st.dailyDemand} unit/hari (ROP: ${st.rop})</span>
                         <span>ITR: <b>${st.turnoverRatio}x/bln</b></span>
                       </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 2C: Tren Produk Paling Laku Keras, Perkiraan (Forecasting) Produksi Bulan Depan & Stok Lama Tidak Laku di Apotek -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-space-lg">
+          <!-- Kiri (7 Kolom): Tren Produk Paling Laku Keras & Perkiraan Produksi Bulan Depan (Pilar 6 CV Arba'in) -->
+          <div class="lg:col-span-7 bg-surface-container-lowest p-space-lg rounded-xl shadow-xs border border-border-subtle/40 flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <div>
+                <span class="font-label-sm text-label-sm uppercase tracking-wider text-primary font-bold">
+                  Pilar 6 CV Arba'in — Tren SKU Terlaris &amp; Forecasting Produksi
+                </span>
+                <h2 class="font-title-sm text-title-sm text-on-surface font-bold">
+                  Produk Paling Laku Keras Bulan Ini &amp; Perkiraan Produksi Bulan Depan
+                </h2>
+              </div>
+              <span class="text-xs font-semibold text-on-surface-variant">Madu Herbal &amp; Kosmetik</span>
+            </div>
+
+            <div class="overflow-x-auto rounded-lg border border-border-subtle/40">
+              <table class="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr class="bg-surface-container-low text-on-surface-variant uppercase tracking-wider text-[11px]">
+                    <th class="px-3 py-2 font-bold">Peringkat &amp; Nama Produk</th>
+                    <th class="px-3 py-2 font-bold">Divisi</th>
+                    <th class="px-3 py-2 font-bold text-right">Laku Bulan Ini</th>
+                    <th class="px-3 py-2 font-bold text-right">Perkiraan Bulan Depan</th>
+                    <th class="px-3 py-2 font-bold text-right">Rekomendasi Bikin Stok</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-border-subtle text-on-surface">
+                  ${analytics.productForecasting.map(function (pf, idx) {
+                    return `
+                      <tr class="hover:bg-surface-container-low/50">
+                        <td class="px-3 py-2.5">
+                          <div class="font-bold text-on-surface">#${idx + 1} · ${pf.name}</div>
+                          <div class="text-[11px] text-on-surface-variant">${pf.sku} · Volume: ${pf.consumptionNote}</div>
+                        </td>
+                        <td class="px-3 py-2.5">
+                          <span class="px-2 py-0.5 rounded bg-surface-container text-[11px] font-semibold text-on-surface">${pf.division}</span>
+                        </td>
+                        <td class="px-3 py-2.5 text-right font-mono font-bold text-primary">${window.ArbaUtils.formatNumber(pf.soldMonth)} unit</td>
+                        <td class="px-3 py-2.5 text-right font-mono font-semibold">${window.ArbaUtils.formatNumber(pf.forecastUnits)} unit</td>
+                        <td class="px-3 py-2.5 text-right font-mono font-bold ${pf.productionNeeded > 1000 ? 'text-rose-600' : 'text-emerald-700'}">
+                          +${window.ArbaUtils.formatNumber(pf.productionNeeded)} unit
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Kanan (5 Kolom): Pantauan Stok Titipan di Apotek yang Lama Tidak Laku (Slow-Moving) -->
+          <div class="lg:col-span-5 bg-surface-container-lowest p-space-lg rounded-xl shadow-xs border border-border-subtle/40 flex flex-col justify-between gap-3">
+            <div>
+              <span class="font-label-sm text-label-sm uppercase tracking-wider text-amber-700 font-bold">
+                Visibilitas Stok Konsinyasi di Apotek Mitra
+              </span>
+              <h2 class="font-title-sm text-title-sm text-on-surface font-bold mb-2">
+                Stok di Apotek yang Lama Tidak Laku (Perlu Ditarik / Dipindahkan)
+              </h2>
+              <div class="space-y-2 max-h-72 overflow-y-auto pr-1">
+                ${analytics.outletSlowMoving.slice(0, 6).map(function (sm) {
+                  return `
+                    <div class="p-2.5 rounded-lg bg-surface-container-low/70 border border-border-subtle/50 flex items-center justify-between gap-2 text-xs">
+                      <div>
+                        <div class="font-bold text-on-surface">${sm.outletName} (${sm.city})</div>
+                        <div class="text-[11px] text-on-surface-variant">${sm.productName} · Titip ${sm.consignedQty}, Laku <b>${sm.soldQty}</b>, Sisa <b>${sm.remainingQty} unit</b></div>
+                        <div class="text-[10px] text-rose-600 font-semibold">Mengendap ${sm.daysInOutlet} hari di apotek · Sales: ${sm.salesRep}</div>
+                      </div>
+                      <span class="px-2 py-1 rounded text-[10px] font-bold bg-amber-100 text-amber-900 shrink-0">Lambat Laku</span>
                     </div>
                   `;
                 }).join('')}
@@ -794,6 +969,21 @@
   }
 
   function bindEvents(container) {
+    // Pink Expiry Alarm -> Instruksikan Sales ("Mbak, tolong yang dijual ini dulu")
+    var pinkBtns = container.querySelectorAll('.btn-pink-alarm-notify');
+    pinkBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var loc = btn.getAttribute('data-location');
+        var prod = btn.getAttribute('data-product');
+        var batch = btn.getAttribute('data-batch');
+        var sales = btn.getAttribute('data-sales');
+        window.ArbaApp.showToast(
+          'Instruksi FEFO dikirim ke ' + sales + ' (' + loc + '): Prioritaskan jual ' + prod + ' (' + batch + ') terlebih dahulu!',
+          'notifications_active'
+        );
+      });
+    });
+
     // Export Excel
     var btnExcel = container.querySelector('#btn-export-excel');
     if (btnExcel) {

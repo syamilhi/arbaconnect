@@ -31,6 +31,7 @@
     var products = appState.products;
     var ledger = appState.ledger;
     var supplierPOs = appState.supplierPOs;
+    var salesLoadings = appState.salesLoadings || [];
 
     // Compute metrics
     var totalPhysicalUnits = products.reduce(function (acc, p) { return acc + p.stock; }, 0);
@@ -583,6 +584,99 @@
           </div>
         </section>
 
+        <!-- SECTION 1B: Kontrol Barang Bawaan Sales dari Gudang (Ambil Gudang Pagi vs Laku di Apotek vs Kembali ke Gudang — Anti-Fraud) -->
+        <section class="flex flex-col gap-space-md bg-surface-container-lowest p-space-lg rounded-xl shadow-xs border border-border-subtle/40">
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-space-md">
+            <div>
+              <div class="flex items-center gap-2">
+                <h2 class="font-headline-md text-headline-md text-on-surface font-bold text-lg">
+                  Kontrol Barang Bawaan Sales Keliling (Ambil Gudang vs Laku Apotek vs Kembali Gudang)
+                </h2>
+                <span class="px-2 py-0.5 rounded-full text-xs font-bold" style="background:#fff7ed; color:#c2410c; border:1px solid #fb923c;">
+                  Anti-Fraud Gudang
+                </span>
+              </div>
+              <p class="font-body-sm text-body-sm text-on-surface-variant text-xs">
+                Mencegah selisih barang bawaan sales (contoh: ambil 15 dari gudang, masuk kantor 12, selisih 3 langsung terdeteksi otomatis)
+              </p>
+            </div>
+            <button
+              id="btn-new-sales-load"
+              type="button"
+              class="px-3.5 py-2 rounded-lg bg-primary text-white text-xs font-semibold cursor-pointer border-0 flex items-center gap-1.5 shrink-0"
+            >
+              <span class="material-symbols-outlined text-[16px]">local_shipping</span>
+              <span>+ Catat Sales Ambil Barang Gudang</span>
+            </button>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            ${salesLoadings.map(function (ld) {
+              var hasDiscrepancy = ld.status === 'SELISIH_AUDIT' || (ld.items || []).some(function (i) { return i.discrepancy > 0; });
+              var isKlop = ld.status === 'TERVERIFIKASI_KLOP' && !hasDiscrepancy;
+              var badgeBg = hasDiscrepancy ? '#fef2f2' : (isKlop ? '#ecfdf5' : '#fffbeb');
+              var badgeBorder = hasDiscrepancy ? '#f87171' : (isKlop ? '#34d399' : '#fbbf24');
+              var badgeColor = hasDiscrepancy ? '#b91c1c' : (isKlop ? '#047857' : '#92400e');
+              var badgeLabel = hasDiscrepancy ? '⚠ SELISIH TERDETEKSI' : (isKlop ? '✓ KEMBALI GUDANG KLOP' : 'SEDANG KELILING');
+
+              return `
+                <div class="rounded-xl p-4 flex flex-col justify-between gap-3" style="background:${badgeBg}; border:1.5px solid ${badgeBorder};">
+                  <div>
+                    <div class="flex items-center justify-between gap-2 mb-1">
+                      <div>
+                        <div class="font-bold text-sm text-slate-900">${ld.salesRep}</div>
+                        <div class="text-[11px] text-slate-600">${ld.division} · ${ld.routeArea}</div>
+                      </div>
+                      <span class="px-2 py-0.5 rounded-full text-[10px] font-bold" style="background:#fff; color:${badgeColor}; border:1px solid ${badgeBorder};">
+                        ${badgeLabel}
+                      </span>
+                    </div>
+
+                    ${ld.auditNote ? `
+                      <div class="p-2 rounded-lg text-[11px] font-semibold mb-2" style="background:#fee2e2; color:#991b1b;">
+                        ${ld.auditNote}
+                      </div>
+                    ` : ''}
+
+                    <div class="bg-white/90 rounded-lg p-2.5 space-y-1.5 border border-slate-200/80 text-xs">
+                      <div class="grid grid-cols-12 text-[10px] font-bold text-slate-500 uppercase pb-1 border-b border-slate-200">
+                        <span class="col-span-5">SKU Produk</span>
+                        <span class="col-span-2 text-center">Ambil</span>
+                        <span class="col-span-2 text-center">Drop</span>
+                        <span class="col-span-3 text-right">Kembali</span>
+                      </div>
+                      ${(ld.items || []).map(function (it) {
+                        return `
+                          <div class="grid grid-cols-12 items-center text-[11px] text-slate-800">
+                            <span class="col-span-5 font-semibold truncate" title="${it.name}">${it.name}</span>
+                            <span class="col-span-2 text-center font-mono font-bold">${it.loadedQty}</span>
+                            <span class="col-span-2 text-center font-mono text-emerald-700 font-bold">${it.droppedQty}</span>
+                            <span class="col-span-3 text-right font-mono font-bold ${it.discrepancy > 0 ? 'text-rose-600' : 'text-slate-800'}">
+                              ${it.returnedQty}${it.discrepancy > 0 ? ` (-${it.discrepancy}!)` : ''}
+                            </span>
+                          </div>
+                        `;
+                      }).join('')}
+                    </div>
+                  </div>
+
+                  <div class="flex items-center justify-between pt-1 text-xs">
+                    <span class="text-slate-700">Setoran Tagihan: <b class="text-slate-900">${window.ArbaUtils.formatRupiah(ld.cashCollected)}</b></span>
+                    <button
+                      type="button"
+                      class="btn-reconcile-load px-2.5 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer border-0"
+                      style="background:#005c55; color:#fff;"
+                      data-load-id="${ld.id}"
+                    >
+                      ${hasDiscrepancy ? 'Selesaikan Selisih & Klopkan' : 'Verifikasi Kembali Gudang'}
+                    </button>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </section>
+
         <!-- SECTION 2: Stock Ledger Audit Log (Immutable Transaction Ledger) -->
         <section class="flex flex-col gap-space-md bg-surface-container-lowest p-space-lg rounded-xl shadow-xs border border-border-subtle/40">
           <div class="flex flex-col md:flex-row md:items-center justify-between gap-space-md">
@@ -837,6 +931,95 @@
         renderInventoryLedger(container);
       });
     });
+
+    // Sales Warehouse Loading Button (Catat Pengambilan Barang Sales)
+    var btnNewLoad = container.querySelector('#btn-new-sales-load');
+    if (btnNewLoad) {
+      btnNewLoad.addEventListener('click', function () {
+        openSalesLoadingModal();
+      });
+    }
+
+    // Reconcile Sales Return to Warehouse (Anti-Fraud Klop)
+    var reconcileBtns = container.querySelectorAll('.btn-reconcile-load');
+    reconcileBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var loadId = btn.getAttribute('data-load-id');
+        window.ArbaStore.reconcileSalesLoading(loadId);
+      });
+    });
+  }
+
+  // Modal Kontrol Pengambilan Barang Bawaan Sales dari Gudang (Anti-Fraud)
+  function openSalesLoadingModal() {
+    var appState = window.ArbaStore.getState();
+    var salesTeam = appState.salesTeam || [];
+    var products = appState.products || [];
+
+    var modalHtml = `
+      <div class="modal-dialog max-w-lg">
+        <div class="modal-header">
+          <div class="flex items-center gap-2.5">
+            <span class="material-symbols-outlined text-primary text-[20px]">local_shipping</span>
+            <div>
+              <h3 class="font-bold text-sm text-on-surface">Catat Pengambilan Barang Sales dari Gudang</h3>
+              <p class="text-[11px] text-on-surface-variant">Pencatatan stok yang dibawa sales keliling (wajib klop saat kembali sore)</p>
+            </div>
+          </div>
+          <button class="icon-btn" onclick="window.ArbaApp.closeModal()">
+            <span class="material-symbols-outlined text-[18px]">close</span>
+          </button>
+        </div>
+
+        <div class="modal-body text-xs space-y-3">
+          <div class="space-y-1">
+            <label class="font-semibold text-on-surface block">Pilih Sales Keliling</label>
+            <select id="load-sales-select" class="w-full p-2.5 rounded-lg border border-border-subtle bg-surface text-on-surface">
+              ${salesTeam.map(function (s) {
+                return `<option value="${s.name}">${s.name} (${s.division} · ${s.area})</option>`;
+              }).join('')}
+            </select>
+          </div>
+
+          <div class="space-y-1">
+            <label class="font-semibold text-on-surface block">Pilih Produk yang Dibawa dari Gudang</label>
+            <select id="load-sku-select" class="w-full p-2.5 rounded-lg border border-border-subtle bg-surface text-on-surface">
+              ${products.map(function (p) {
+                return `<option value="${p.sku}">${p.name} (Stok Gudang: ${p.stock} unit)</option>`;
+              }).join('')}
+            </select>
+          </div>
+
+          <div class="space-y-1">
+            <label class="font-semibold text-on-surface block">Jumlah Unit yang Dibawa Keliling</label>
+            <input type="number" id="load-qty-input" value="15" min="1" max="500" class="w-full p-2.5 rounded-lg border border-border-subtle bg-surface text-on-surface font-mono font-bold" />
+          </div>
+
+          <div class="flex justify-end gap-2 pt-2">
+            <button type="button" class="px-3.5 py-2 rounded-lg bg-surface-container text-on-surface font-semibold cursor-pointer border-0" onclick="window.ArbaApp.closeModal()">Batal</button>
+            <button type="button" id="btn-save-sales-load" class="px-4 py-2 rounded-lg bg-primary text-white font-semibold cursor-pointer border-0">Simpan Bawaan Sales</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    window.ArbaApp.openModal(modalHtml);
+    setTimeout(function () {
+      var btnSave = document.getElementById('btn-save-sales-load');
+      if (btnSave) {
+        btnSave.onclick = function () {
+          var repEl = document.getElementById('load-sales-select');
+          var skuEl = document.getElementById('load-sku-select');
+          var qtyEl = document.getElementById('load-qty-input');
+          window.ArbaStore.recordSalesWarehouseLoad({
+            salesRep: repEl ? repEl.value : 'Budi Santoso',
+            sku: skuEl ? skuEl.value : 'SKU-ARB-MDR500',
+            loadedQty: qtyEl ? Number(qtyEl.value) : 15
+          });
+          window.ArbaApp.closeModal();
+        };
+      }
+    }, 30);
   }
 
   // Modal 0: Migrasi / Impor Master Produk & Saldo Stok Awal (CSV)

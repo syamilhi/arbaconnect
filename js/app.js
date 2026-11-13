@@ -83,10 +83,20 @@
       var container = document.getElementById('main-view-container');
       if (!container) return;
 
-      // Update active nav button styling in sidebar
+      // Update active nav button styling & Role-Based Access Control (RBAC) visibility in sidebar
+      var roleAllowedMap = {
+        'executive': ['executive-dashboard', 'inventory-stock-ledger', 'b2b-crm-directory', 'order-approval-queue', 'field-sales-pwa-preview'],
+        'inventory': ['inventory-stock-ledger', 'order-approval-queue'],
+        'sales-ops': ['b2b-crm-directory', 'order-approval-queue', 'field-sales-pwa-preview'],
+        'field-sales': ['field-sales-pwa-preview', 'b2b-crm-directory']
+      };
+      var allowedPaths = roleAllowedMap[state.currentRole] || roleAllowedMap['executive'];
+
       var navButtons = document.querySelectorAll('.nav-button');
       navButtons.forEach(function (btn) {
         var path = btn.getAttribute('data-path');
+        var isAllowed = allowedPaths.indexOf(path) !== -1;
+        btn.style.display = isAllowed ? '' : 'none';
         if (path === state.currentPath) {
           btn.classList.add('active');
         } else {
@@ -387,10 +397,25 @@
     },
 
     updateHeaderControls: function (state) {
-      // Role select value
+      // Role select value & Profile label update
       var roleSelect = document.getElementById('role-perspective-select');
       if (roleSelect && roleSelect.value !== state.currentRole) {
         roleSelect.value = state.currentRole;
+      }
+      var profilePill = document.getElementById('header-profile-pill');
+      if (profilePill) {
+        var roleLabelMap = {
+          'executive': ['Direktur & Manajemen', 'Akses Penuh 6 Pilar ERP'],
+          'inventory': ['Admin Gudang & Stok', 'Akses Terbatas: Gudang & Mutasi'],
+          'sales-ops': ['Verifikasi Admin Sales', 'Akses Terbatas: Konsinyasi & Order'],
+          'field-sales': [state.currentSalesRep || 'Budi Santoso', 'Akses Terbatas: Sales Lapangan']
+        };
+        var labels = roleLabelMap[state.currentRole] || roleLabelMap['executive'];
+        var spans = profilePill.querySelectorAll('span.text-xs, span.text-\\[11px\\]');
+        if (spans.length >= 2) {
+          spans[0].textContent = labels[0];
+          spans[1].textContent = labels[1];
+        }
       }
 
       // Online status indicator
