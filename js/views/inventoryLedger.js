@@ -23,7 +23,9 @@
     searchQuery: '',
     selectedCategory: 'all',
     selectedRopStatus: 'all',
-    activeLedgerFilter: 'ALL'
+    activeLedgerFilter: 'ALL',
+    catalogPage: 1,
+    catalogPageSize: 6
   };
 
   function renderInventoryLedger(container) {
@@ -50,6 +52,7 @@
         (state.selectedCategory === 'madu' && p.category === 'Madu Herbal') ||
         (state.selectedCategory === 'kapsul' && p.category === 'Kapsul Herbal') ||
         (state.selectedCategory === 'minyak' && p.category === 'Minyak & Cairan') ||
+        (state.selectedCategory === 'kosmetik' && p.category === 'Kosmetik Herbal') ||
         (state.selectedCategory === 'serbuk' && p.category === 'Serbuk');
 
       var matchesStatus =
@@ -60,6 +63,13 @@
 
       return matchesSearch && matchesCategory && matchesStatus;
     });
+
+    var totalCatalogPages = Math.max(1, Math.ceil(filteredProducts.length / state.catalogPageSize));
+    if (state.catalogPage > totalCatalogPages) state.catalogPage = totalCatalogPages;
+    var paginatedProducts = filteredProducts.slice(
+      (state.catalogPage - 1) * state.catalogPageSize,
+      state.catalogPage * state.catalogPageSize
+    );
 
     // Filter ledger
     var filteredLedger = ledger.filter(function (entry) {
@@ -412,6 +422,7 @@
                 <option value="madu" ${state.selectedCategory === 'madu' ? 'selected' : ''}>Madu Herbal</option>
                 <option value="kapsul" ${state.selectedCategory === 'kapsul' ? 'selected' : ''}>Kapsul Herbal</option>
                 <option value="minyak" ${state.selectedCategory === 'minyak' ? 'selected' : ''}>Minyak &amp; Cairan</option>
+                <option value="kosmetik" ${state.selectedCategory === 'kosmetik' ? 'selected' : ''}>Kosmetik Herbal</option>
                 <option value="serbuk" ${state.selectedCategory === 'serbuk' ? 'selected' : ''}>Serbuk</option>
               </select>
               <select
@@ -442,7 +453,7 @@
                 </tr>
               </thead>
               <tbody class="font-body-md text-body-md divide-y divide-border-subtle/30">
-                ${filteredProducts.map(function (p) {
+                ${paginatedProducts.map(function (p) {
                   var isBelowRop = p.stock <= p.rop;
                   var isCriticalExp = p.fefoStatus === 'Kritis (<30 Hari)';
                   var isWarningExp = p.fefoStatus === 'Mendekati ED (<3 Bulan)';
@@ -569,15 +580,33 @@
 
           <!-- Table Pagination & Count Note -->
           <div class="flex flex-col sm:flex-row items-center justify-between text-on-surface-variant font-label-sm text-label-sm pt-2 text-xs">
-            <div>Menampilkan ${filteredProducts.length} dari ${products.length} Master SKU Herbal CV Arba'in</div>
+            <div>Menampilkan ${paginatedProducts.length} dari ${filteredProducts.length} Master SKU Herbal CV Arba'in (Hal ${state.catalogPage}/${totalCatalogPages})</div>
             <div class="flex items-center gap-1">
-              <button class="px-2.5 py-1 rounded bg-surface-container-low hover:bg-surface-container text-on-surface font-semibold border-0 cursor-pointer">
-                1
+              <button
+                id="btn-catalog-prev"
+                type="button"
+                class="px-2.5 py-1 rounded bg-surface-container-lowest hover:bg-surface-container text-on-surface border-0 cursor-pointer ${state.catalogPage <= 1 ? 'opacity-40' : ''}"
+              >
+                &lt; Sebelumnya
               </button>
-              <button class="px-2.5 py-1 rounded bg-surface-container-lowest hover:bg-surface-container text-on-surface border-0 cursor-pointer">
-                2
-              </button>
-              <button class="px-2.5 py-1 rounded bg-surface-container-lowest hover:bg-surface-container text-on-surface border-0 cursor-pointer">
+              ${Array.from({ length: totalCatalogPages }, function (_, idx) {
+                var pNum = idx + 1;
+                var active = pNum === state.catalogPage;
+                return `
+                  <button
+                    type="button"
+                    class="btn-catalog-page px-2.5 py-1 rounded ${active ? 'bg-primary text-white font-bold' : 'bg-surface-container-low hover:bg-surface-container text-on-surface font-semibold'} border-0 cursor-pointer"
+                    data-page="${pNum}"
+                  >
+                    ${pNum}
+                  </button>
+                `;
+              }).join('')}
+              <button
+                id="btn-catalog-next"
+                type="button"
+                class="px-2.5 py-1 rounded bg-surface-container-lowest hover:bg-surface-container text-on-surface border-0 cursor-pointer ${state.catalogPage >= totalCatalogPages ? 'opacity-40' : ''}"
+              >
                 Berikutnya &gt;
               </button>
             </div>
@@ -940,14 +969,150 @@
       });
     }
 
-    // Reconcile Sales Return to Warehouse (Anti-Fraud Klop)
+    // Reconcile Sales Return to Warehouse (Anti-Fraud Klop / Hitung Fisik Sore)
     var reconcileBtns = container.querySelectorAll('.btn-reconcile-load');
     reconcileBtns.forEach(function (btn) {
       btn.addEventListener('click', function () {
         var loadId = btn.getAttribute('data-load-id');
-        window.ArbaStore.reconcileSalesLoading(loadId);
+        openReconcileLoadingModal(loadId);
       });
     });
+
+    // Catalog Pagination
+    var catPrev = container.querySelector('#btn-catalog-prev');
+    var catNext = container.querySelector('#btn-catalog-next');
+    var catPages = container.querySelectorAll('.btn-catalog-page');
+    if (catPrev) {
+      catPrev.addEventListener('click', function () {
+        if (state.catalogPage > 1) {
+          state.catalogPage--;
+          renderInventoryLedger(container);
+        }
+      });
+    }
+    if (catNext) {
+      catNext.addEventListener('click', function () {
+        state.catalogPage++;
+        renderInventoryLedger(container);
+      });
+    }
+    catPages.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        state.catalogPage = Number(btn.getAttribute('data-page')) || 1;
+        renderInventoryLedger(container);
+      });
+    });
+  }
+
+  // Modal Rekonsiliasi Hitung Fisik Barang Bawaan Sales Sore Hari (Anti-Fraud)
+  function openReconcileLoadingModal(loadId) {
+    var appState = window.ArbaStore.getState();
+    var loadRec = (appState.salesLoadings || []).find(function (l) { return l.id === loadId; });
+    if (!loadRec) return;
+
+    var modalHtml = `
+      <div class="modal-dialog max-w-xl">
+        <div class="modal-header">
+          <div class="flex items-center gap-2.5">
+            <span class="material-symbols-outlined text-primary text-[22px]">fact_check</span>
+            <div>
+              <h3 class="font-bold text-sm text-on-surface">Rekonsiliasi Sisa Barang Bawaan Sales (Anti-Fraud Sore)</h3>
+              <p class="text-[11px] text-on-surface-variant">${loadRec.salesRep} (${loadRec.division}) • ${loadRec.id}</p>
+            </div>
+          </div>
+          <button class="icon-btn" onclick="window.ArbaApp.closeModal()">
+            <span class="material-symbols-outlined text-[18px]">close</span>
+          </button>
+        </div>
+
+        <form id="form-reconcile-loading">
+          <div class="modal-body text-xs space-y-3">
+            <div class="p-2.5 rounded-lg bg-surface-container-low border border-border-subtle/50 text-on-surface-variant">
+              Masukkan jumlah fisik barang yang dikembalikan sales ke gudang sore ini. Jika jumlah fisik yang kembali kurang dari <b>Wajib Kembali (Bawa Pagi - Laku Apotek)</b>, sistem otomatis menandai <b>SELISIH AUDIT</b>.
+            </div>
+
+            <div class="overflow-x-auto rounded-lg border border-border-subtle/50">
+              <table class="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr class="bg-surface-container-low text-on-surface-variant text-[10px] uppercase">
+                    <th class="p-2">Produk Herbal</th>
+                    <th class="p-2 text-center">Bawa Pagi</th>
+                    <th class="p-2 text-center">Laku Apotek</th>
+                    <th class="p-2 text-center">Wajib Kembali</th>
+                    <th class="p-2 text-center">Fisik Kembali (Unit)</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-border-subtle/40">
+                  ${loadRec.items.map(function (it) {
+                    var expected = Math.max(0, it.loadedQty - it.droppedQty);
+                    return `
+                      <tr>
+                        <td class="p-2 font-semibold text-on-surface">
+                          <div>${it.name}</div>
+                          <div class="text-[10px] font-mono text-on-surface-variant">${it.sku} • ${it.batch}</div>
+                        </td>
+                        <td class="p-2 text-center font-mono font-bold">${it.loadedQty}</td>
+                        <td class="p-2 text-center font-mono font-bold text-primary">${it.droppedQty}</td>
+                        <td class="p-2 text-center font-mono font-bold text-emerald-700">${expected}</td>
+                        <td class="p-2 text-center">
+                          <input
+                            type="number"
+                            class="reconcile-return-input w-20 p-1.5 rounded border border-border-subtle text-center font-mono font-bold text-on-surface bg-surface"
+                            data-sku="${it.sku}"
+                            data-expected="${expected}"
+                            min="0"
+                            max="${it.loadedQty}"
+                            value="${it.returnedQty !== undefined ? it.returnedQty : expected}"
+                          />
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="modal-footer flex items-center justify-between">
+            <button
+              type="button"
+              id="btn-reconcile-auto-klop"
+              class="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer border-0"
+            >
+              Set Semua Sesuai &amp; Klop 100%
+            </button>
+            <div class="flex items-center gap-2">
+              <button type="button" class="btn btn-outline" onclick="window.ArbaApp.closeModal()">Batal</button>
+              <button type="submit" class="btn btn-primary">Simpan Hasil Hitung Fisik</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    `;
+
+    window.ArbaApp.openModal(modalHtml);
+
+    var btnAutoKlop = document.getElementById('btn-reconcile-auto-klop');
+    if (btnAutoKlop) {
+      btnAutoKlop.onclick = function () {
+        window.ArbaStore.reconcileSalesLoading(loadId);
+        window.ArbaApp.closeModal();
+      };
+    }
+
+    var form = document.getElementById('form-reconcile-loading');
+    if (form) {
+      form.onsubmit = function (e) {
+        e.preventDefault();
+        var map = {};
+        document.querySelectorAll('.reconcile-return-input').forEach(function (inp) {
+          var sku = inp.getAttribute('data-sku');
+          map[sku] = Number(inp.value) || 0;
+        });
+        window.ArbaStore.reconcileSalesLoading(loadId, map);
+        window.ArbaApp.closeModal();
+      };
+    }
   }
 
   // Modal Kontrol Pengambilan Barang Bawaan Sales dari Gudang (Anti-Fraud)
@@ -1337,7 +1502,7 @@
                   <div>
                     <div class="flex items-center gap-2">
                       <span class="font-bold font-mono text-primary">${po.id}</span>
-                      <span class="px-2 py-0.5 rounded-full bg-status-warning-bg text-status-warning-text font-semibold">
+                      <span class="px-2 py-0.5 rounded-full ${po.status === 'DITERIMA' ? 'bg-status-success-bg text-status-success-text' : 'bg-status-warning-bg text-status-warning-text'} font-semibold">
                         ${po.status}
                       </span>
                     </div>
@@ -1347,15 +1512,21 @@
                   <div class="text-right">
                     <div class="font-bold text-sm text-on-surface">${po.quantity} Unit</div>
                     <div class="text-on-surface-variant font-mono">${window.ArbaUtils.formatRupiah(po.totalCost)}</div>
-                    <button
-                      class="btn-receive-po mt-1 px-2.5 py-1 rounded bg-primary text-white font-semibold text-[11px] cursor-pointer shadow-xs active:scale-95 border-0"
-                      data-po-id="${po.id}"
-                      data-po-sku="${po.sku}"
-                      data-po-qty="${po.quantity}"
-                      type="button"
-                    >
-                      Terima Barang Sekarang
-                    </button>
+                    ${po.status === 'DITERIMA' ? `
+                      <span class="inline-flex items-center gap-1 mt-1 px-2.5 py-1 rounded bg-status-success-bg text-status-success-text font-bold text-[11px]">
+                        <span class="material-symbols-outlined text-[14px]">verified</span> Telah Masuk Gudang
+                      </span>
+                    ` : `
+                      <button
+                        class="btn-receive-po mt-1 px-2.5 py-1 rounded bg-primary text-white font-semibold text-[11px] cursor-pointer shadow-xs active:scale-95 border-0"
+                        data-po-id="${po.id}"
+                        data-po-sku="${po.sku}"
+                        data-po-qty="${po.quantity}"
+                        type="button"
+                      >
+                        Terima Barang Sekarang
+                      </button>
+                    `}
                   </div>
                 </div>
               `;

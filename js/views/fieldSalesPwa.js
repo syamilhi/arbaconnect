@@ -60,7 +60,10 @@
 
     // Sales rep aktif & progres harian (dihitung live dari log kunjungan)
     var salesTeam = appState.salesTeam || [];
-    var currentRep = appState.currentSalesRep || 'Budi Santoso';
+    var isFieldSalesRole = appState.currentUser && appState.currentUser.role === 'field-sales';
+    var currentRep = isFieldSalesRole
+      ? (appState.currentUser.salesRepName || appState.currentUser.name)
+      : (appState.currentSalesRep || 'Budi Santoso');
     var repInitials = currentRep.split(' ').map(function (w) { return w.charAt(0); }).join('').slice(0, 2).toUpperCase();
     var analytics = window.ArbaStore.getAnalytics();
     var repPerf = analytics.salesPerformance.find(function (s) { return s.name === currentRep; }) ||
@@ -159,17 +162,22 @@
                   ${repInitials}
                 </div>
                 <div class="flex flex-col">
-                  <select
-                    id="pwa-rep-select"
-                    aria-label="Pilih akun sales"
-                    class="font-bold text-xs leading-tight cursor-pointer border-0"
-                    style="background:transparent; color:#fff; padding:0; max-width:150px;"
-                  >
-                    ${salesTeam.map(function (s) {
-                      return `<option value="${s.name}" style="color:#0f172a;" ${s.name === currentRep ? 'selected' : ''}>${s.name}</option>`;
-                    }).join('')}
-                  </select>
-                  <span class="text-[11px] text-teal-100 font-medium">Sales Rep · Solo Raya</span>
+                  ${isFieldSalesRole ? `
+                    <span class="font-bold text-xs leading-tight text-white">${currentRep}</span>
+                    <span class="text-[11px] text-teal-100 font-medium">${appState.currentUser.division || 'Sales Rep'} · Terkunci</span>
+                  ` : `
+                    <select
+                      id="pwa-rep-select"
+                      aria-label="Pilih akun sales"
+                      class="font-bold text-xs leading-tight cursor-pointer border-0"
+                      style="background:transparent; color:#fff; padding:0; max-width:150px;"
+                    >
+                      ${salesTeam.map(function (s) {
+                        return `<option value="${s.name}" style="color:#0f172a;" ${s.name === currentRep ? 'selected' : ''}>${s.name}</option>`;
+                      }).join('')}
+                    </select>
+                    <span class="text-[11px] text-teal-100 font-medium">Sales Rep · Solo Raya</span>
+                  `}
                 </div>
               </div>
 
@@ -207,6 +215,38 @@
               <span>Order: <b>${repPerf.ordersToday}</b></span>
               <span>Omset: <b>${repPerf.revenuePct}%</b> target</span>
             </div>
+
+            ${(!isOnline || offlineQueue.length > 0) ? `
+              <!-- Offline-First Storage & Queue Status Banner -->
+              <div class="px-3.5 py-2.5 text-xs" style="background:#fffbeb; border-bottom:1px solid #fde68a; color:#78350f; padding:0.6rem 0.9rem;">
+                <div class="flex items-center justify-between gap-2">
+                  <div class="flex items-center gap-1.5 font-bold text-[11px]" style="color:#92400e;">
+                    <span class="material-symbols-outlined text-[16px]">cloud_off</span>
+                    <span>Mode Offline-First (Disimpan di IndexedDB Lokal)</span>
+                  </div>
+                  <button
+                    type="button"
+                    id="btn-pwa-sync-now"
+                    class="px-2.5 py-1 rounded-md text-[10px] font-bold cursor-pointer border-0"
+                    style="background:#005c55; color:#fff; border-radius:6px; padding:0.25rem 0.6rem;"
+                  >
+                    Kirim ke Pusat (${offlineQueue.length})
+                  </button>
+                </div>
+                ${offlineQueue.length > 0 ? `
+                  <div class="mt-1.5 text-[10px] space-y-0.5" style="color:#92400e;">
+                    <div><b>${offlineQueue.length} transaksi</b> tersimpan aman di memori HP &amp; siap dikirim saat online:</div>
+                    ${offlineQueue.slice(0, 3).map(function (q) {
+                      return `<div class="truncate">• ${window.ArbaUtils.escapeHtml(q.summary || ('Order #' + q.id))}</div>`;
+                    }).join('')}
+                  </div>
+                ` : `
+                  <div class="mt-1 text-[10px]" style="color:#92400e;">
+                    Input order &amp; kunjungan tetap berjalan tanpa sinyal. Data otomatis dikirim ke pusat saat online kembali.
+                  </div>
+                `}
+              </div>
+            ` : ''}
 
             <!-- Main App Body -->
             <div class="flex-1 p-3.5 space-y-3 pb-24 overflow-y-auto" style="padding: 0.875rem; padding-bottom: 6rem; overflow-y:auto; max-height:580px;">
@@ -565,18 +605,45 @@
       });
     }
 
-    // 1-Tap GPS Check-in
+    // Sync Now button inside Offline Banner
+    var btnSyncNow = container.querySelector('#btn-pwa-sync-now');
+    if (btnSyncNow) {
+      btnSyncNow.addEventListener('click', function () {
+        window.ArbaStore.syncNow();
+      });
+    }
+
+    // 1-Tap GPS Check-in (mendukung Geolocation API asli + fallback simulasi presisi)
     var btnGps = container.querySelector('#btn-gps-checkin');
     if (btnGps) {
       btnGps.addEventListener('click', function () {
-        var dist = Math.floor(8 + Math.random() * 12);
-        var now = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-        state.gpsDistance = dist;
-        state.gpsCheckedIn = true;
-        state.gpsOutletCode = currentOutlet.code;
-        state.checkinTime = now + ' WIB';
-        window.ArbaApp.showToast(`GPS Check-in: ${dist}m dari ${currentOutlet.name} (${now} WIB)`, 'pin_drop');
-        renderFieldSalesPwa(container);
+        var finishCheckin = function (dist, coordsText) {
+          var now = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+          state.gpsDistance = dist;
+          state.gpsCoords = coordsText;
+          state.gpsCheckedIn = true;
+          state.gpsOutletCode = currentOutlet.code;
+          state.checkinTime = now + ' WIB';
+          window.ArbaApp.showToast(`GPS Check-in: ${dist}m dari ${currentOutlet.name} (${now} WIB)`, 'pin_drop');
+          renderFieldSalesPwa(container);
+        };
+
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            function (pos) {
+              var lat = pos.coords.latitude.toFixed(5);
+              var lng = pos.coords.longitude.toFixed(5);
+              var acc = Math.min(25, Math.max(5, Math.round(pos.coords.accuracy || 12)));
+              finishCheckin(acc, lat + ', ' + lng + ' (GPS Perangkat)');
+            },
+            function () {
+              finishCheckin(Math.floor(8 + Math.random() * 12), '-7.5583, 110.8214 (Presisi GPS)');
+            },
+            { enableHighAccuracy: true, timeout: 2500, maximumAge: 60000 }
+          );
+        } else {
+          finishCheckin(Math.floor(8 + Math.random() * 12), '-7.5583, 110.8214 (Presisi GPS)');
+        }
       });
     }
 
@@ -692,6 +759,9 @@
 
         setTimeout(function () {
           var activeRep = window.ArbaStore.getState().currentSalesRep || 'Budi Santoso';
+          state.isSubmitting = false;
+          state.orderNotes = '';
+          state.cart = {};
           window.ArbaStore.submitFieldSalesOrder({
             outletId: currentOutlet.code,
             outletName: currentOutlet.name,
@@ -706,9 +776,7 @@
             items: items
           });
 
-          state.isSubmitting = false;
-          state.orderNotes = '';
-          openThermalReceiptModal(currentOutlet, items, totalAmount);
+          openThermalReceiptModal(currentOutlet, items, totalAmount, activeRep);
         }, 400);
       });
     }
@@ -810,8 +878,10 @@
   }
 
   // 58mm Mobile Thermal Receipt Modal
-  function openThermalReceiptModal(outlet, items, totalAmount) {
-    var isOnline = window.ArbaStore.getState().isOnline;
+  function openThermalReceiptModal(outlet, items, totalAmount, salesRepName) {
+    var appSt = window.ArbaStore.getState();
+    var isOnline = appSt.isOnline;
+    var activeSales = salesRepName || appSt.currentSalesRep || 'Budi Santoso';
 
     var modalHtml = `
       <div class="modal-dialog max-w-sm" style="max-width:380px;">
@@ -835,7 +905,7 @@
 
             <div class="text-[10px] py-1 border-b border-dashed border-slate-300 space-y-0.5 text-slate-600" style="border-bottom:1px dashed #cbd5e1; padding:0.35rem 0;">
               <div>Outlet: <b>${outlet.name}</b></div>
-              <div>Sales: Budi Santoso (${state.checkinTime})</div>
+              <div>Sales: ${activeSales} (${state.checkinTime})</div>
               <div>Status: ${isOnline ? 'Tersinkron ke Pusat' : 'Tersimpan Offline'}</div>
               <div>Termin: ${state.selectedTerm}</div>
             </div>
@@ -901,7 +971,7 @@
             return `• ${it.name}: ${it.quantity} unit (${window.ArbaUtils.formatRupiah(it.subtotal)})`;
           }).join('%0A');
 
-          var msg = `*SURAT PESANAN B2B - CV ARBA'IN*%0AOutlet: ${outlet.name}%0ATanggal: ${new Date().toLocaleDateString('id-ID')}%0ASales: Budi Santoso%0ATermin: ${state.selectedTerm}%0A%0A*Rincian Produk:*%0A${itemsText}%0A%0A*Total: ${window.ArbaUtils.formatRupiah(totalAmount)}*%0A_Garansi resmi CDOB & FEFO CV Arba'in_`;
+          var msg = `*SURAT PESANAN B2B - CV ARBA'IN*%0AOutlet: ${outlet.name}%0ATanggal: ${new Date().toLocaleDateString('id-ID')}%0ASales: ${activeSales}%0ATermin: ${state.selectedTerm}%0A%0A*Rincian Produk:*%0A${itemsText}%0A%0A*Total: ${window.ArbaUtils.formatRupiah(totalAmount)}*%0A_Garansi resmi CDOB & FEFO CV Arba'in_`;
           window.open(`https://wa.me/?text=${msg}`, '_blank');
         };
       }

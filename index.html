@@ -75,10 +75,11 @@
 
         <!-- Header Controls & Actions -->
         <div class="header-actions">
-          <!-- Role Perspective Switcher -->
-          <div class="role-switcher-container">
+          <!-- Role Perspective Switcher (Khusus Super Admin) -->
+          <div class="role-switcher-container" id="role-switcher-wrapper">
             <span class="material-symbols-outlined role-icon">tune</span>
             <select id="role-perspective-select" class="role-select" title="Ganti Role Perspektif" aria-label="Ganti Role Perspektif">
+              <option value="super-admin">Super Admin (All Access)</option>
               <option value="executive">Direksi &amp; Manajemen</option>
               <option value="field-sales">Field Sales (PWA)</option>
               <option value="inventory">Admin Gudang &amp; Stok</option>
@@ -88,9 +89,14 @@
           </div>
 
           <!-- Online / Local Sync Status Indicator -->
-          <button id="header-online-btn" class="online-toggle-btn" type="button" title="Klik untuk simulasi mode Online / Offline">
+          <button id="header-online-btn" class="online-toggle-btn" type="button" title="Klik untuk beralih mode Online (Server Pusat) / Offline (Lokal IndexedDB)">
             <span id="header-online-dot" class="status-dot online"></span>
             <span id="header-online-text" class="hidden sm:inline">Tersinkron</span>
+          </button>
+
+          <!-- Install PWA App Button (shown when installable) -->
+          <button id="header-install-pwa-btn" class="icon-btn hidden" type="button" title="Install Aplikasi ArbaConnect (PWA Offline-First)" aria-label="Install Aplikasi PWA">
+            <span class="material-symbols-outlined text-[18px]">install_mobile</span>
           </button>
 
           <!-- Fullscreen Mode Toggle -->
@@ -140,16 +146,19 @@
             </div>
           </div>
 
-          <!-- User Profile Pill -->
-          <div id="header-profile-pill" class="flex items-center gap-2 pl-2 border-l border-border-subtle cursor-pointer hover:opacity-80 transition-opacity" title="Profil Akun Pengguna">
-            <div class="w-8 h-8 rounded-full bg-primary/10 text-primary border border-primary/20 flex items-center justify-center font-bold">
-              <span class="material-symbols-outlined text-[18px]">person</span>
+          <!-- User Profile Pill & Logout / Switch Role Button -->
+          <div id="header-profile-pill" class="flex items-center gap-2 pl-2 border-l border-border-subtle cursor-pointer hover:opacity-80 transition-opacity" title="Klik untuk Profil Akun, Hak Akses Modul &amp; Ganti User">
+            <div id="header-profile-avatar" class="w-8 h-8 rounded-full bg-primary/10 text-primary border border-primary/20 flex items-center justify-center font-bold text-xs">
+              AZ
             </div>
             <div class="hidden xl:flex flex-col text-left">
-              <span class="text-xs text-on-surface font-semibold leading-tight">Admin Operasional</span>
-              <span class="text-[11px] text-on-surface-variant leading-none">CV Arba'in Logistik</span>
+              <span class="text-xs text-on-surface font-semibold leading-tight">H. Ahmad Zaini, S.E.</span>
+              <span class="text-[11px] text-on-surface-variant leading-none">Direktur Operasional</span>
             </div>
           </div>
+          <button id="header-logout-btn" class="icon-btn" type="button" title="Ganti Akun / Login Per Role / Logout" aria-label="Ganti Akun atau Logout">
+            <span class="material-symbols-outlined text-[18px]">switch_account</span>
+          </button>
         </div>
       </header>
 
@@ -210,6 +219,22 @@
                 <span class="nav-label">Field Sales PWA Preview</span>
               </div>
             </button>
+
+            <!-- 6. Manajemen Semua User (Khusus Super Admin) -->
+            <button class="nav-button" data-path="user-management" type="button" title="Manajemen Semua User &amp; RBAC (Super Admin)">
+              <div class="nav-button-content">
+                <span class="material-symbols-outlined text-[20px] shrink-0">manage_accounts</span>
+                <span class="nav-label">Manajemen Semua User</span>
+              </div>
+            </button>
+
+            <!-- 7. Edit Detail User & Ganti Password -->
+            <button class="nav-button" data-path="user-profile-settings" type="button" title="Edit Detail User &amp; Ganti Password">
+              <div class="nav-button-content">
+                <span class="material-symbols-outlined text-[20px] shrink-0">person_edit</span>
+                <span class="nav-label">Profil &amp; Ganti Password</span>
+              </div>
+            </button>
           </nav>
         </div>
 
@@ -263,12 +288,15 @@
     <!-- Pure Vanilla Scripts Loaded in Deterministic Dependency Order -->
     <script src="js/data.js"></script>
     <script src="js/utils.js"></script>
+    <script src="js/offlineSync.js"></script>
     <script src="js/store.js"></script>
+    <script src="js/auth.js"></script>
     <script src="js/views/executiveDashboard.js"></script>
     <script src="js/views/inventoryLedger.js"></script>
     <script src="js/views/b2bCrm.js"></script>
     <script src="js/views/orderApproval.js"></script>
     <script src="js/views/fieldSalesPwa.js"></script>
+    <script src="js/views/userProfileAndAdmin.js"></script>
     <script src="js/app.js"></script>
   </body>
 </html>

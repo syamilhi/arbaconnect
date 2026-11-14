@@ -6,12 +6,18 @@
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- 1. Tabel Pengguna & Hak Akses Per Peran (RBAC)
+-- 1. Tabel Pengguna & Hak Akses Per Peran (RBAC + Super Admin)
 CREATE TABLE users (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    username        VARCHAR(64)  UNIQUE NOT NULL,
     nama            VARCHAR(120) NOT NULL,
     email           VARCHAR(150) UNIQUE NOT NULL,
-    peran           VARCHAR(32)  NOT NULL CHECK (peran IN ('sales', 'admin_gudang', 'admin_penjualan', 'direktur')),
+    password_hash   VARCHAR(255) NOT NULL,
+    pin_offline     VARCHAR(16)  DEFAULT '123456',
+    no_telp         VARCHAR(32),
+    jabatan         VARCHAR(100),
+    divisi          VARCHAR(120),
+    peran           VARCHAR(32)  NOT NULL CHECK (peran IN ('super_admin', 'direktur', 'admin_gudang', 'admin_penjualan', 'sales')),
     aktif           BOOLEAN      NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );

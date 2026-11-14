@@ -20,6 +20,8 @@
     periodFilter: 'month', // 'month' | 'q1'
     streamFilter: 'ALL',   // 'ALL' | 'SYNCED' | 'PENDING'
     streamSearch: '',
+    streamPage: 1,
+    streamPageSize: 5,
     selectedOrderForDetail: null
   };
 
@@ -44,6 +46,13 @@
 
       return matchesSearch && matchesStatus;
     });
+
+    var totalStreamPages = Math.max(1, Math.ceil(filteredOrders.length / state.streamPageSize));
+    if (state.streamPage > totalStreamPages) state.streamPage = totalStreamPages;
+    var paginatedStreamOrders = filteredOrders.slice(
+      (state.streamPage - 1) * state.streamPageSize,
+      state.streamPage * state.streamPageSize
+    );
 
     var isMonth = state.periodFilter === 'month';
 
@@ -535,9 +544,20 @@
                         <div class="font-bold text-xs text-slate-900">${al.name}</div>
                         <div class="text-[11px] text-slate-600">Konsumsi: <b>${al.consumptionNote}</b> · Ambang ROP: <b>${al.rop} unit</b></div>
                       </div>
-                      <div class="text-right">
-                        <div class="font-mono font-bold text-xs" style="color:#ea580c;">Sisa: ${al.stock} unit</div>
-                        <div class="text-[10px] font-semibold" style="color:#9a3412;">Kurang ${al.shortage} unit dari ROP</div>
+                      <div class="flex items-center gap-2">
+                        <div class="text-right">
+                          <div class="font-mono font-bold text-xs" style="color:#ea580c;">Sisa: ${al.stock} unit</div>
+                          <div class="text-[10px] font-semibold" style="color:#9a3412;">Kurang ${al.shortage} unit dari ROP</div>
+                        </div>
+                        <button
+                          type="button"
+                          class="btn-orange-alarm-restock px-2 py-1 rounded-lg text-[11px] font-bold cursor-pointer border-0 shrink-0"
+                          style="background:#ea580c; color:#fff;"
+                          data-sku="${window.ArbaUtils.escapeHtml(al.sku)}"
+                          data-name="${window.ArbaUtils.escapeHtml(al.name)}"
+                        >
+                          Restock
+                        </button>
                       </div>
                     </div>
                   `;
@@ -765,7 +785,16 @@
                         <div class="text-[11px] text-on-surface-variant">${sm.productName} · Titip ${sm.consignedQty}, Laku <b>${sm.soldQty}</b>, Sisa <b>${sm.remainingQty} unit</b></div>
                         <div class="text-[10px] text-rose-600 font-semibold">Mengendap ${sm.daysInOutlet} hari di apotek · Sales: ${sm.salesRep}</div>
                       </div>
-                      <span class="px-2 py-1 rounded text-[10px] font-bold bg-amber-100 text-amber-900 shrink-0">Lambat Laku</span>
+                      <button
+                        type="button"
+                        class="btn-slow-moving-rotate px-2 py-1 rounded text-[10px] font-bold bg-amber-100 hover:bg-amber-200 text-amber-900 shrink-0 cursor-pointer border border-amber-300"
+                        data-outlet="${window.ArbaUtils.escapeHtml(sm.outletName)}"
+                        data-product="${window.ArbaUtils.escapeHtml(sm.productName)}"
+                        data-sales="${window.ArbaUtils.escapeHtml(sm.salesRep)}"
+                        data-qty="${sm.remainingQty}"
+                      >
+                        Tarik / Rotasi
+                      </button>
                     </div>
                   `;
                 }).join('')}
@@ -858,7 +887,7 @@
                 </tr>
               </thead>
               <tbody class="divide-y divide-border-subtle font-body-sm text-body-sm text-on-surface">
-                ${filteredOrders.map(function (order) {
+                ${paginatedStreamOrders.map(function (order) {
                   var isSynced = order.syncStatus === 'SYNCED_DEDUCTED';
                   var initials = order.salesRep
                     .split(' ')
@@ -943,19 +972,34 @@
                 WebSocket PWA Stream Terhubung: <strong>Latency 42ms</strong>
               </span>
               <span>•</span>
-              <span>Menampilkan ${filteredOrders.length} dari ${orders.length} transaksi masuk hari ini</span>
+              <span>Menampilkan ${paginatedStreamOrders.length} dari ${filteredOrders.length} transaksi (Hal ${state.streamPage}/${totalStreamPages})</span>
             </div>
             <div class="flex items-center gap-1">
-              <button class="px-3 py-1.5 rounded-lg bg-surface-container-low hover:bg-surface-container text-on-surface font-semibold cursor-pointer border-0" type="button">
+              <button
+                id="btn-stream-prev"
+                class="px-3 py-1.5 rounded-lg bg-surface-container-low hover:bg-surface-container text-on-surface font-semibold cursor-pointer border-0 ${state.streamPage <= 1 ? 'opacity-40' : ''}"
+                type="button"
+              >
                 Sebelumnya
               </button>
-              <button class="px-3 py-1.5 rounded-lg bg-primary-container text-white font-bold cursor-pointer border-0" type="button">
-                1
-              </button>
-              <button class="px-3 py-1.5 rounded-lg bg-surface-container-low hover:bg-surface-container text-on-surface font-semibold cursor-pointer border-0" type="button">
-                2
-              </button>
-              <button class="px-3 py-1.5 rounded-lg bg-surface-container-low hover:bg-surface-container text-on-surface font-semibold cursor-pointer border-0" type="button">
+              ${Array.from({ length: totalStreamPages }, function (_, idx) {
+                var pNum = idx + 1;
+                var active = pNum === state.streamPage;
+                return `
+                  <button
+                    class="btn-stream-page px-3 py-1.5 rounded-lg ${active ? 'bg-primary-container text-white font-bold' : 'bg-surface-container-low hover:bg-surface-container text-on-surface font-semibold'} cursor-pointer border-0"
+                    data-page="${pNum}"
+                    type="button"
+                  >
+                    ${pNum}
+                  </button>
+                `;
+              }).join('')}
+              <button
+                id="btn-stream-next"
+                class="px-3 py-1.5 rounded-lg bg-surface-container-low hover:bg-surface-container text-on-surface font-semibold cursor-pointer border-0 ${state.streamPage >= totalStreamPages ? 'opacity-40' : ''}"
+                type="button"
+              >
                 Berikutnya
               </button>
             </div>
@@ -969,6 +1013,39 @@
   }
 
   function bindEvents(container) {
+    // Orange Stock Alarm -> Quick Restock / Jump to Inventory
+    var orangeBtns = container.querySelectorAll('.btn-orange-alarm-restock');
+    orangeBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var name = btn.getAttribute('data-name');
+        window.ArbaApp.navigate('inventory-stock-ledger');
+        window.ArbaApp.showToast('Membuka Buku Besar Stok untuk menerbitkan PO Restock: ' + name, 'local_mall');
+      });
+    });
+
+    // Slow-Moving Consignment -> Tarik / Rotasi Stok ke Apotek ramai
+    var slowBtns = container.querySelectorAll('.btn-slow-moving-rotate');
+    slowBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var outlet = btn.getAttribute('data-outlet');
+        var prod = btn.getAttribute('data-product');
+        var sales = btn.getAttribute('data-sales');
+        var qty = btn.getAttribute('data-qty');
+        window.ArbaStore.scheduleSalesVisit({
+          outletId: 'AP-SLO-001',
+          outletName: outlet,
+          salesRep: sales,
+          scheduledDate: 'Besok Pagi (Prioritas Rotasi)',
+          purpose: 'Tarik & Rotasi Stok Konsinyasi Lambat Laku',
+          notes: 'Tarik ' + qty + ' unit ' + prod + ' untuk dipindahkan ke apotek berkecepatan tinggi.'
+        });
+        window.ArbaApp.showToast(
+          'Instruksi Rotasi Stok dikirim ke ' + sales + ': Tarik ' + qty + ' unit ' + prod + ' dari ' + outlet,
+          'published_with_changes'
+        );
+      });
+    });
+
     // Pink Expiry Alarm -> Instruksikan Sales ("Mbak, tolong yang dijual ini dulu")
     var pinkBtns = container.querySelectorAll('.btn-pink-alarm-notify');
     pinkBtns.forEach(function (btn) {
@@ -1091,6 +1168,31 @@
         window.ArbaApp.navigate('inventory-stock-ledger');
       });
     });
+
+    // Stream Pagination buttons
+    var prevBtn = container.querySelector('#btn-stream-prev');
+    var nextBtn = container.querySelector('#btn-stream-next');
+    var pageBtns = container.querySelectorAll('.btn-stream-page');
+    if (prevBtn) {
+      prevBtn.addEventListener('click', function () {
+        if (state.streamPage > 1) {
+          state.streamPage--;
+          renderExecutiveDashboard(container);
+        }
+      });
+    }
+    if (nextBtn) {
+      nextBtn.addEventListener('click', function () {
+        state.streamPage++;
+        renderExecutiveDashboard(container);
+      });
+    }
+    pageBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        state.streamPage = Number(btn.getAttribute('data-page')) || 1;
+        renderExecutiveDashboard(container);
+      });
+    });
   }
 
   // Quick Detail Modal
@@ -1166,6 +1268,7 @@
   // Executive Strategic PDF Report Modal
   function openPdfModal() {
     var outlets = window.ArbaStore.getState().outlets;
+    var analytics = window.ArbaStore.getAnalytics();
     var modalHtml = `
       <div class="modal-dialog max-w-2xl">
         <div class="modal-header">
@@ -1197,13 +1300,13 @@
             <div class="grid grid-cols-3 gap-3 text-center">
               <div class="p-3 bg-slate-50 rounded-lg border border-slate-200">
                 <span class="text-[11px] text-slate-500 uppercase font-semibold">Total Omset</span>
-                <div class="text-lg font-bold text-teal-700">Rp 482.650.000</div>
-                <span class="text-[10px] text-emerald-600 font-semibold">+14.8% vs Target</span>
+                <div class="text-lg font-bold text-teal-700">${window.ArbaUtils.formatRupiah(analytics.revenueMonth)}</div>
+                <span class="text-[10px] text-emerald-600 font-semibold">${analytics.revenuePct}% dari Target</span>
               </div>
               <div class="p-3 bg-slate-50 rounded-lg border border-slate-200">
                 <span class="text-[11px] text-slate-500 uppercase font-semibold">Mitra B2B Aktif</span>
-                <div class="text-lg font-bold text-slate-800">${outlets.length} Outlet</div>
-                <span class="text-[10px] text-slate-500">Solo Raya 7 Kota</span>
+                <div class="text-lg font-bold text-slate-800">${analytics.totalOutlets} Outlet</div>
+                <span class="text-[10px] text-slate-500">${outlets.length} Sampel + Jaringan Konsinyasi</span>
               </div>
               <div class="p-3 bg-slate-50 rounded-lg border border-slate-200">
                 <span class="text-[11px] text-slate-500 uppercase font-semibold">Kepatuhan FEFO</span>

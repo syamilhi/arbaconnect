@@ -23,7 +23,9 @@
     selectedRegion: 'ALL',
     selectedType: 'ALL',
     selectedCredit: 'ALL',
-    activeRouteFilter: 'all'
+    activeRouteFilter: 'all',
+    crmPage: 1,
+    crmPageSize: 6
   };
 
   function renderB2bCrm(container) {
@@ -50,6 +52,13 @@
 
       return matchesSearch && matchesRegion && matchesType && matchesCredit && matchesRoute;
     });
+
+    var totalCrmPages = Math.max(1, Math.ceil(filteredOutlets.length / state.crmPageSize));
+    if (state.crmPage > totalCrmPages) state.crmPage = totalCrmPages;
+    var paginatedOutlets = filteredOutlets.slice(
+      (state.crmPage - 1) * state.crmPageSize,
+      state.crmPage * state.crmPageSize
+    );
 
     var percentRemaining = selectedOutlet
       ? Math.round((selectedOutlet.creditRemaining / selectedOutlet.creditLimit) * 100)
@@ -334,7 +343,7 @@
                   </tr>
                 </thead>
                 <tbody class="text-on-surface text-body-md font-body-md divide-y divide-border-subtle/30">
-                  ${filteredOutlets.map(function (outlet) {
+                  ${paginatedOutlets.map(function (outlet) {
                     var isSelected = outlet.id === selectedOutletId;
                     var pRemaining = Math.round((outlet.creditRemaining / outlet.creditLimit) * 100);
 
@@ -495,22 +504,36 @@
             <!-- Pagination / Table Footer -->
             <div class="px-space-md py-3 bg-surface-container-low flex flex-col sm:flex-row items-center justify-between gap-2 border-t border-border-subtle/30 text-xs p-3">
               <span class="font-label-sm text-label-sm text-on-surface-variant">
-                Menampilkan ${filteredOutlets.length} dari ${168 + (outlets.length - 6)} outlet terdaftar CV Arba'in
+                Menampilkan ${paginatedOutlets.length} dari ${filteredOutlets.length} outlet terfilter (Total Jaringan: 1.024+ Mitra • Hal ${state.crmPage}/${totalCrmPages})
               </span>
               <div class="flex items-center gap-1">
-                <button class="w-8 h-8 rounded flex items-center justify-center text-on-surface-variant bg-surface-container-lowest hover:bg-surface-container transition-colors cursor-pointer border-0" type="button">
+                <button
+                  id="btn-crm-prev"
+                  class="w-8 h-8 rounded flex items-center justify-center text-on-surface-variant bg-surface-container-lowest hover:bg-surface-container transition-colors cursor-pointer border-0 ${state.crmPage <= 1 ? 'opacity-40' : ''}"
+                  type="button"
+                >
                   <span class="material-symbols-outlined text-[16px]">chevron_left</span>
                 </button>
-                <span class="w-8 h-8 rounded bg-primary text-white flex items-center justify-center font-label-sm text-label-sm font-semibold">
-                  1
-                </span>
-                <button class="w-8 h-8 rounded flex items-center justify-center text-on-surface-variant bg-surface-container-lowest hover:bg-surface-container transition-colors cursor-pointer border-0" type="button">
-                  2
-                </button>
-                <button class="w-8 h-8 rounded flex items-center justify-center text-on-surface-variant bg-surface-container-lowest hover:bg-surface-container transition-colors cursor-pointer border-0" type="button">
-                  3
-                </button>
-                <button class="w-8 h-8 rounded flex items-center justify-center text-on-surface-variant bg-surface-container-lowest hover:bg-surface-container transition-colors cursor-pointer border-0" type="button">
+                ${Array.from({ length: totalCrmPages }, function (_, idx) {
+                  var pNum = idx + 1;
+                  var active = pNum === state.crmPage;
+                  return `
+                    <button
+                      type="button"
+                      class="btn-crm-page w-8 h-8 rounded flex items-center justify-center font-label-sm text-label-sm font-semibold cursor-pointer border-0 ${
+                        active ? 'bg-primary text-white' : 'text-on-surface-variant bg-surface-container-lowest hover:bg-surface-container'
+                      }"
+                      data-page="${pNum}"
+                    >
+                      ${pNum}
+                    </button>
+                  `;
+                }).join('')}
+                <button
+                  id="btn-crm-next"
+                  class="w-8 h-8 rounded flex items-center justify-center text-on-surface-variant bg-surface-container-lowest hover:bg-surface-container transition-colors cursor-pointer border-0 ${state.crmPage >= totalCrmPages ? 'opacity-40' : ''}"
+                  type="button"
+                >
                   <span class="material-symbols-outlined text-[16px]">chevron_right</span>
                 </button>
               </div>
@@ -901,6 +924,31 @@
         });
       }
     }
+
+    // CRM Pagination buttons
+    var crmPrev = container.querySelector('#btn-crm-prev');
+    var crmNext = container.querySelector('#btn-crm-next');
+    var crmPages = container.querySelectorAll('.btn-crm-page');
+    if (crmPrev) {
+      crmPrev.addEventListener('click', function () {
+        if (state.crmPage > 1) {
+          state.crmPage--;
+          renderB2bCrm(container);
+        }
+      });
+    }
+    if (crmNext) {
+      crmNext.addEventListener('click', function () {
+        state.crmPage++;
+        renderB2bCrm(container);
+      });
+    }
+    crmPages.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        state.crmPage = Number(btn.getAttribute('data-page')) || 1;
+        renderB2bCrm(container);
+      });
+    });
   }
 
   // Modal 0: Migrasi / Impor Data Awal Outlet B2B (CSV)

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 36 36" fill="none">
+  <rect width="36" height="36" rx="8" fill="url(#arbaBrandGrad)"/>
+  <path d="M10 24C10 24 12 15 21 12C21 12 23 21 14 24C12 25 10 24 10 24Z" fill="#A3FAEF" opacity="0.95"/>
+  <path d="M12 23C16 19 20 15 25 10" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="25" cy="10" r="3" fill="#5BB8FE" stroke="#FFFFFF" stroke-width="1.5"/>
+  <circle cx="26" cy="22" r="2.2" fill="#FFFFFF"/>
+  <path d="M17 19L26 22" stroke="#FFFFFF" stroke-width="1.5" stroke-dasharray="2 2" stroke-linecap="round"/>
+  <defs>
+    <linearGradient id="arbaBrandGrad" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#005C55"/>
+      <stop offset="1" stop-color="#0F766E"/>
+    </linearGradient>
+  </defs>
+</svg>

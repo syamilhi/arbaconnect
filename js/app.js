@@ -15,6 +15,12 @@
       this.bindGlobalKeyboard();
       this.subscribeStore();
       this.render();
+      if (window.ArbaOfflineSync && typeof window.ArbaOfflineSync.init === 'function') {
+        window.ArbaOfflineSync.init();
+      }
+      if (window.ArbaAuth && typeof window.ArbaAuth.init === 'function') {
+        window.ArbaAuth.init();
+      }
     },
 
     initTheme: function () {
@@ -83,14 +89,28 @@
       var container = document.getElementById('main-view-container');
       if (!container) return;
 
-      // Update active nav button styling & Role-Based Access Control (RBAC) visibility in sidebar
-      var roleAllowedMap = {
-        'executive': ['executive-dashboard', 'inventory-stock-ledger', 'b2b-crm-directory', 'order-approval-queue', 'field-sales-pwa-preview'],
-        'inventory': ['inventory-stock-ledger', 'order-approval-queue'],
-        'sales-ops': ['b2b-crm-directory', 'order-approval-queue', 'field-sales-pwa-preview'],
-        'field-sales': ['field-sales-pwa-preview', 'b2b-crm-directory']
-      };
-      var allowedPaths = roleAllowedMap[state.currentRole] || roleAllowedMap['executive'];
+      if (window.ArbaAuth && typeof window.ArbaAuth.updateAppShellVisibility === 'function') {
+        window.ArbaAuth.updateAppShellVisibility();
+      }
+
+      // Jika belum ada user yang login, tampilkan khusus halaman Login dan jangan render halaman internal
+      if (!state.currentUser) {
+        container.innerHTML = '';
+        if (window.ArbaAuth && typeof window.ArbaAuth.showLoginPortal === 'function') {
+          window.ArbaAuth.showLoginPortal();
+        }
+        return;
+      }
+
+      // Strict Role-Based Access Control (RBAC): Hanya tampilkan halaman yang diizinkan untuk user aktif
+      var allowedPaths = window.ArbaStore.getAllowedPathsForUser(state.currentUser);
+
+      if (allowedPaths.indexOf(state.currentPath) === -1) {
+        var fallback = (state.currentUser.defaultPath && allowedPaths.indexOf(state.currentUser.defaultPath) !== -1)
+          ? state.currentUser.defaultPath
+          : allowedPaths[0];
+        state.currentPath = fallback || 'user-profile-settings';
+      }
 
       var navButtons = document.querySelectorAll('.nav-button');
       navButtons.forEach(function (btn) {
@@ -131,9 +151,19 @@
             window.ArbaViews.renderFieldSalesPwa(container);
           }
           break;
+        case 'user-management':
+          if (window.ArbaViews.renderUserManagement) {
+            window.ArbaViews.renderUserManagement(container);
+          }
+          break;
+        case 'user-profile-settings':
+          if (window.ArbaViews.renderUserProfileSettings) {
+            window.ArbaViews.renderUserProfileSettings(container);
+          }
+          break;
         default:
-          if (window.ArbaViews.renderExecutiveDashboard) {
-            window.ArbaViews.renderExecutiveDashboard(container);
+          if (window.ArbaViews.renderUserProfileSettings) {
+            window.ArbaViews.renderUserProfileSettings(container);
           }
           break;
       }
@@ -145,11 +175,16 @@
     bindHeader: function () {
       var self = this;
 
-      // Brand Logo click
+      // Brand Logo click -> Navigate to user's default permitted page
       var brand = document.getElementById('header-brand-logo');
       if (brand) {
         brand.addEventListener('click', function () {
-          self.navigate('executive-dashboard');
+          var st = window.ArbaStore.getState();
+          var allowed = window.ArbaStore.getAllowedPathsForUser(st.currentUser);
+          var target = (st.currentUser && st.currentUser.defaultPath && allowed.indexOf(st.currentUser.defaultPath) !== -1)
+            ? st.currentUser.defaultPath
+            : (allowed[0] || 'user-profile-settings');
+          self.navigate(target);
         });
       }
 
@@ -209,6 +244,16 @@
       if (onlineBtn) {
         onlineBtn.addEventListener('click', function () {
           window.ArbaStore.toggleOnlineStatus();
+        });
+      }
+
+      // Install PWA button
+      var installBtn = document.getElementById('header-install-pwa-btn');
+      if (installBtn) {
+        installBtn.addEventListener('click', function () {
+          if (window.ArbaOfflineSync && typeof window.ArbaOfflineSync.promptInstallPWA === 'function') {
+            window.ArbaOfflineSync.promptInstallPWA();
+          }
         });
       }
 
@@ -273,12 +318,26 @@
         }
       }
 
-      // User profile pill click
+      // User profile pill click -> Open RBAC Profile & Account Switcher Modal
       var profilePill = document.getElementById('header-profile-pill');
       if (profilePill) {
         profilePill.addEventListener('click', function () {
-          var role = window.ArbaStore.getState().currentRole;
-          self.showToast(`Login sebagai: ${role.toUpperCase()} (CV Arba'in Logistik)`, 'account_circle');
+          if (window.ArbaAuth && typeof window.ArbaAuth.openProfileModal === 'function') {
+            window.ArbaAuth.openProfileModal();
+          } else {
+            var role = window.ArbaStore.getState().currentRole;
+            self.showToast(`Login sebagai: ${role.toUpperCase()} (CV Arba'in Logistik)`, 'account_circle');
+          }
+        });
+      }
+
+      // Header Logout / Switch Role button -> Open Full Login Portal
+      var logoutBtn = document.getElementById('header-logout-btn');
+      if (logoutBtn) {
+        logoutBtn.addEventListener('click', function () {
+          if (window.ArbaAuth && typeof window.ArbaAuth.showLoginPortal === 'function') {
+            window.ArbaAuth.showLoginPortal();
+          }
         });
       }
     },
@@ -397,24 +456,42 @@
     },
 
     updateHeaderControls: function (state) {
-      // Role select value & Profile label update
+      // Role switcher wrapper: Hanya ditampilkan untuk Super Admin
+      var roleWrapper = document.getElementById('role-switcher-wrapper') || document.querySelector('.role-switcher-container');
       var roleSelect = document.getElementById('role-perspective-select');
+      if (roleWrapper) {
+        var isSuper = state.currentUser && state.currentUser.role === 'super-admin';
+        roleWrapper.style.display = isSuper ? '' : 'none';
+      }
       if (roleSelect && roleSelect.value !== state.currentRole) {
         roleSelect.value = state.currentRole;
       }
       var profilePill = document.getElementById('header-profile-pill');
+      var profileAvatar = document.getElementById('header-profile-avatar');
       if (profilePill) {
         var roleLabelMap = {
-          'executive': ['Direktur & Manajemen', 'Akses Penuh 6 Pilar ERP'],
-          'inventory': ['Admin Gudang & Stok', 'Akses Terbatas: Gudang & Mutasi'],
-          'sales-ops': ['Verifikasi Admin Sales', 'Akses Terbatas: Konsinyasi & Order'],
-          'field-sales': [state.currentSalesRep || 'Budi Santoso', 'Akses Terbatas: Sales Lapangan']
+          'super-admin': ['Farid Super Administrator', 'Super Admin & RBAC Manager'],
+          'executive': ['H. Ahmad Zaini, S.E.', 'Direktur & Manajemen (6 Pilar)'],
+          'inventory': ['Slamet Riadi', 'Kepala Gudang & Stok FEFO'],
+          'sales-ops': ['Dewi Sartika, S.Ak.', 'Koordinator Admin Penjualan'],
+          'field-sales': [state.currentSalesRep || 'Budi Santoso', 'Sales Lapangan (Mobile PWA)']
         };
-        var labels = roleLabelMap[state.currentRole] || roleLabelMap['executive'];
+        var labels = state.currentUser
+          ? [state.currentUser.name, state.currentUser.title]
+          : (roleLabelMap[state.currentRole] || roleLabelMap['executive']);
         var spans = profilePill.querySelectorAll('span.text-xs, span.text-\\[11px\\]');
         if (spans.length >= 2) {
           spans[0].textContent = labels[0];
           spans[1].textContent = labels[1];
+        }
+        if (profileAvatar) {
+          var initials = (state.currentUser && state.currentUser.avatarInitials) ||
+            labels[0].split(' ').map(function (w) { return w[0]; }).join('').slice(0, 2).toUpperCase();
+          profileAvatar.textContent = initials;
+          if (state.currentUser && state.currentUser.badgeColor) {
+            profileAvatar.style.backgroundColor = state.currentUser.badgeColor;
+            profileAvatar.style.color = '#ffffff';
+          }
         }
       }
 
@@ -422,12 +499,13 @@
       var statusDot = document.getElementById('header-online-dot');
       var statusText = document.getElementById('header-online-text');
       if (statusDot && statusText) {
+        var qLen = (state.offlineQueue && state.offlineQueue.length) || 0;
         if (state.isOnline) {
           statusDot.className = 'status-dot online';
           statusText.textContent = 'Tersinkron';
         } else {
           statusDot.className = 'status-dot offline';
-          statusText.textContent = 'Mode Lokal';
+          statusText.textContent = qLen > 0 ? 'Mode Lokal (' + qLen + ')' : 'Mode Lokal';
         }
       }
 
@@ -563,7 +641,22 @@
       // Browser forward/backward navigation via hashchange
       window.addEventListener('hashchange', function () {
         var h = window.location.hash.replace(/^#\/?/, '');
-        if (h && ['executive-dashboard', 'inventory-stock-ledger', 'b2b-crm-directory', 'order-approval-queue', 'field-sales-pwa-preview'].indexOf(h) !== -1) {
+        if (h === 'login') {
+          if (window.ArbaAuth && typeof window.ArbaAuth.showLoginPortal === 'function') {
+            window.ArbaAuth.showLoginPortal();
+          }
+          return;
+        }
+        var validPaths = [
+          'executive-dashboard',
+          'inventory-stock-ledger',
+          'b2b-crm-directory',
+          'order-approval-queue',
+          'field-sales-pwa-preview',
+          'user-management',
+          'user-profile-settings'
+        ];
+        if (h && validPaths.indexOf(h) !== -1) {
           if (h !== window.ArbaStore.getState().currentPath) {
             window.ArbaStore.setPath(h);
           }

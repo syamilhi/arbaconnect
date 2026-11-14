@@ -49,6 +49,25 @@
       });
     }
 
+    // Sort displayedOrders based on state.selectedSort
+    displayedOrders = displayedOrders.slice().sort(function (a, b) {
+      if (state.selectedSort === 'highest_val') {
+        return (b.totalAmount || 0) - (a.totalAmount || 0);
+      }
+      if (state.selectedSort === 'urgency') {
+        var scoreA = (a.priority === 'High' ? 2 : 0) + (a.stockWarning ? 1 : 0);
+        var scoreB = (b.priority === 'High' ? 2 : 0) + (b.stockWarning ? 1 : 0);
+        return scoreB - scoreA || ((b.totalAmount || 0) - (a.totalAmount || 0));
+      }
+      if (state.selectedSort === 'credit_risk') {
+        var ratioA = a.limitMax ? (a.limitRemaining / a.limitMax) : 1;
+        var ratioB = b.limitMax ? (b.limitRemaining / b.limitMax) : 1;
+        return ratioA - ratioB;
+      }
+      // default: 'latest'
+      return (b.orderTimestamp || 0) - (a.orderTimestamp || 0);
+    });
+
     var html = `
       <div class="flex flex-col w-full">
         <!-- Top Section: Metric Ribbon & Audit Integrity Indicator -->
@@ -211,10 +230,10 @@
                 class="w-full bg-surface-container-low font-body-md text-body-md text-on-surface pl-9 pr-8 py-2 rounded-lg border-0 cursor-pointer focus:outline-none text-xs"
                 style="padding-left: 2.25rem;"
               >
-                <option value="latest">Waktu Masuk (Terbaru)</option>
-                <option value="urgency">Tingkat Urgensi Outlet</option>
-                <option value="highest_val">Nilai Pesanan Tertinggi</option>
-                <option value="credit_risk">Limit Kredit Mendekati Batas</option>
+                <option value="latest" ${state.selectedSort === 'latest' ? 'selected' : ''}>Waktu Masuk (Terbaru)</option>
+                <option value="urgency" ${state.selectedSort === 'urgency' ? 'selected' : ''}>Tingkat Urgensi Outlet</option>
+                <option value="highest_val" ${state.selectedSort === 'highest_val' ? 'selected' : ''}>Nilai Pesanan Tertinggi</option>
+                <option value="credit_risk" ${state.selectedSort === 'credit_risk' ? 'selected' : ''}>Limit Kredit Mendekati Batas</option>
               </select>
             </div>
 
@@ -701,7 +720,11 @@
                           </span>
                         </div>
                         <div class="flex flex-wrap items-center gap-2 text-xs">
-                          <h3 class="font-title-sm text-title-sm font-bold text-on-surface text-sm">
+                          <h3
+                            class="btn-focus-order font-title-sm text-title-sm font-bold text-on-surface hover:text-primary cursor-pointer text-sm"
+                            data-order-id="${order.id}"
+                            title="Klik untuk membuka panel inspeksi utama"
+                          >
                             ${order.outletName}
                           </h3>
                           <span class="text-on-surface-variant">•</span>
@@ -914,6 +937,27 @@
       });
     }
 
+    // Sort select
+    var sortSelect = container.querySelector('#select-sort-order');
+    if (sortSelect) {
+      sortSelect.addEventListener('change', function (e) {
+        state.selectedSort = e.target.value;
+        renderOrderApproval(container);
+      });
+    }
+
+    // Focus order into main expanded inspection view
+    var focusBtns = container.querySelectorAll('.btn-focus-order');
+    focusBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var oid = btn.getAttribute('data-order-id');
+        if (oid) {
+          state.selectedOrderIds = [oid];
+          renderOrderApproval(container);
+        }
+      });
+    });
+
     // Select all checkbox
     var selectAll = container.querySelector('#checkbox-select-all');
     if (selectAll) {
@@ -947,7 +991,12 @@
     var btnBatchPrint = container.querySelector('#btn-batch-print');
     if (btnBatchPrint) {
       btnBatchPrint.addEventListener('click', function () {
-        window.ArbaApp.showToast(`Mencetak ${state.selectedOrderIds.length || 1} berkas Surat Jalan Kolektif (Rangkap 3)...`, 'print');
+        var orders = window.ArbaStore.getState().orders;
+        var targetOrder = orders.find(function (o) { return state.selectedOrderIds.indexOf(o.id) !== -1; }) || orders[0];
+        if (targetOrder) {
+          openSuratJalanModal(targetOrder);
+        }
+        window.ArbaApp.showToast(`Membuka pratinjau cetak Surat Jalan Kolektif (${state.selectedOrderIds.length || 1} faktur dipilih)...`, 'print');
       });
     }
 

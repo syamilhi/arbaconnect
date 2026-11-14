@@ -1,0 +1,13 @@
+{
+  "name": "arbaconnect-erp",
+  "version": "3.0.0",
+  "description": "ArbaConnect Logistics ERP - Offline-First PWA & Central Relational SQL Server for CV Arba'in Solo Raya",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node --no-warnings server/server.js",
+    "dev": "node --no-warnings --watch server/server.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}

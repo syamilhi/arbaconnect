@@ -4,7 +4,17 @@
  */
 
 window.ArbaStore = (function() {
-  const STORAGE_KEY = 'arbaconnect_erp_state_v4';
+  const STORAGE_KEY = 'arbaconnect_erp_state_v5';
+  const ALL_VALID_PATHS = [
+    'login',
+    'executive-dashboard',
+    'inventory-stock-ledger',
+    'b2b-crm-directory',
+    'order-approval-queue',
+    'field-sales-pwa-preview',
+    'user-management',
+    'user-profile-settings'
+  ];
 
   // Load from local storage or fallback to ArbaData initial values
   function loadInitialState() {
@@ -14,7 +24,7 @@ window.ArbaStore = (function() {
     if (typeof window !== 'undefined' && window.location) {
       if (window.location.hash) {
         const h = window.location.hash.replace(/^#\/?/, '');
-        if (['executive-dashboard', 'inventory-stock-ledger', 'b2b-crm-directory', 'order-approval-queue', 'field-sales-pwa-preview'].indexOf(h) !== -1) {
+        if (ALL_VALID_PATHS.indexOf(h) !== -1) {
           hashPath = h;
         }
       }
@@ -39,6 +49,8 @@ window.ArbaStore = (function() {
         return {
           currentPath: hashPath || parsed.currentPath || 'executive-dashboard',
           currentRole: parsed.currentRole || 'executive',
+          currentUser: parsed.currentUser || null,
+          users: parsed.users || JSON.parse(JSON.stringify(ArbaData.users || [])),
           isOnline: parsed.isOnline !== undefined ? parsed.isOnline : true,
           isDarkMode: overrideDarkMode !== null ? overrideDarkMode : (parsed.isDarkMode || false),
           isSidebarCollapsed: overrideSidebarCollapsed !== null ? overrideSidebarCollapsed : (parsed.isSidebarCollapsed !== undefined ? parsed.isSidebarCollapsed : true),
@@ -64,6 +76,8 @@ window.ArbaStore = (function() {
     return {
       currentPath: hashPath || 'executive-dashboard',
       currentRole: 'executive',
+      currentUser: null,
+      users: JSON.parse(JSON.stringify(ArbaData.users || [])),
       isOnline: true,
       isDarkMode: overrideDarkMode !== null ? overrideDarkMode : false,
       isSidebarCollapsed: overrideSidebarCollapsed !== null ? overrideSidebarCollapsed : true,
@@ -92,6 +106,8 @@ window.ArbaStore = (function() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         currentPath: state.currentPath,
         currentRole: state.currentRole,
+        currentUser: state.currentUser,
+        users: state.users,
         isOnline: state.isOnline,
         isDarkMode: state.isDarkMode,
         isSidebarCollapsed: state.isSidebarCollapsed,
@@ -305,7 +321,49 @@ window.ArbaStore = (function() {
     return hits.length ? ` ⚠ Low-stock: ${hits.join(', ')} di bawah ROP!` : '';
   }
 
+  function getAllowedPathsForUser(user) {
+    if (!user) return ['login'];
+    if (user.role === 'super-admin') {
+      return [
+        'executive-dashboard',
+        'inventory-stock-ledger',
+        'b2b-crm-directory',
+        'order-approval-queue',
+        'field-sales-pwa-preview',
+        'user-management',
+        'user-profile-settings'
+      ];
+    }
+    if (Array.isArray(user.permissions) && user.permissions.length > 0) {
+      const perms = user.permissions.slice();
+      if (perms.indexOf('user-profile-settings') === -1) perms.push('user-profile-settings');
+      return perms;
+    }
+    const roleAllowedMap = {
+      'executive': ['executive-dashboard', 'inventory-stock-ledger', 'b2b-crm-directory', 'order-approval-queue', 'user-profile-settings'],
+      'inventory': ['inventory-stock-ledger', 'order-approval-queue', 'user-profile-settings'],
+      'sales-ops': ['order-approval-queue', 'b2b-crm-directory', 'user-profile-settings'],
+      'field-sales': ['field-sales-pwa-preview', 'b2b-crm-directory', 'user-profile-settings']
+    };
+    return roleAllowedMap[user.role] || ['user-profile-settings'];
+  }
+
   function setPath(path) {
+    if (!state.currentUser) {
+      state.currentPath = 'login';
+      if (typeof window !== 'undefined' && window.location) {
+        window.location.hash = 'login';
+      }
+      notify();
+      return;
+    }
+
+    const allowed = getAllowedPathsForUser(state.currentUser);
+    if (allowed.indexOf(path) === -1) {
+      showToast(`Akses Ditolak: Halaman tersebut tidak diizinkan untuk role ${state.currentUser.title}`, 'lock');
+      path = state.currentUser.defaultPath || allowed[0] || 'user-profile-settings';
+    }
+
     state.currentPath = path;
     if (typeof window !== 'undefined' && window.location) {
       if (window.location.hash.replace(/^#\/?/, '') !== path) {
@@ -319,21 +377,250 @@ window.ArbaStore = (function() {
   }
 
   function setRole(role) {
+    // Hanya Super Admin yang diizinkan berpindah perspektif role secara bebas
+    if (state.currentUser && state.currentUser.role !== 'super-admin') {
+      showToast('Hanya Super Admin yang dapat mengganti perspektif role secara bebas.', 'lock');
+      return;
+    }
     state.currentRole = role;
-    if (role === 'field-sales') {
+    if (role === 'super-admin') {
+      state.currentPath = 'user-management';
+      showToast('Perspektif Super Admin: Akses Penuh Seluruh Sistem & Manajemen User', 'admin_panel_settings');
+    } else if (role === 'field-sales') {
       state.currentPath = 'field-sales-pwa-preview';
-      showToast('Beralih ke mode Field Sales Rep (Mobile PWA)', 'smartphone');
+      showToast(`Simulasi Perspektif Field Sales: ${state.currentSalesRep} (Mobile PWA)`, 'smartphone');
     } else if (role === 'inventory') {
       state.currentPath = 'inventory-stock-ledger';
-      showToast('Beralih ke Manajemen Gudang & Stock Ledger', 'warehouse');
+      showToast('Simulasi Perspektif Admin Gudang & Stock Ledger', 'warehouse');
     } else if (role === 'sales-ops') {
       state.currentPath = 'order-approval-queue';
-      showToast('Beralih ke Antrean Otorisasi Pesanan', 'fact_check');
+      showToast('Simulasi Perspektif Admin Penjualan & Verifikasi', 'fact_check');
     } else {
       state.currentPath = 'executive-dashboard';
-      showToast('Beralih ke Executive Director & Management', 'dashboard');
+      showToast('Simulasi Perspektif Direktur & Manajemen', 'dashboard');
+    }
+    if (typeof window !== 'undefined' && window.location) {
+      window.location.hash = state.currentPath;
     }
     notify();
+  }
+
+  function loginUser(userObj, options) {
+    options = options || {};
+    if (!userObj) return null;
+    // Ambil objek terbaru dari state.users agar perubahan profil/password selalu mutakhir
+    const latestUser = (state.users || []).find(u => u.id === userObj.id) || userObj;
+    if (latestUser.active === false) {
+      showToast('Akun ini sedang dinonaktifkan oleh Super Admin.', 'block');
+      return null;
+    }
+    state.currentUser = JSON.parse(JSON.stringify(latestUser));
+    state.currentRole = latestUser.role || 'executive';
+    if (latestUser.salesRepName) {
+      state.currentSalesRep = latestUser.salesRepName;
+    }
+    const allowed = getAllowedPathsForUser(state.currentUser);
+    if (!options.preservePath || allowed.indexOf(state.currentPath) === -1) {
+      state.currentPath = latestUser.defaultPath || allowed[0] || 'executive-dashboard';
+    }
+    if (typeof window !== 'undefined' && window.location) {
+      window.location.hash = state.currentPath;
+    }
+    if (!options.silent) {
+      showToast(`Selamat datang, ${latestUser.name} (${latestUser.title})!`, 'verified_user');
+    }
+    notify();
+    return state.currentUser;
+  }
+
+  function logoutUser() {
+    const prevName = state.currentUser ? state.currentUser.name : 'Pengguna';
+    state.currentUser = null;
+    state.currentPath = 'login';
+    if (typeof window !== 'undefined' && window.location) {
+      window.location.hash = 'login';
+    }
+    showToast(`Sesi ${prevName} telah berakhir. Silakan login kembali.`, 'logout');
+    notify();
+  }
+
+  function updateUserProfile(userId, updates) {
+    const idx = (state.users || []).findIndex(u => u.id === userId);
+    if (idx === -1) return { ok: false, message: 'Pengguna tidak ditemukan.' };
+
+    const target = state.users[idx];
+    const oldSalesName = target.salesRepName || target.name;
+
+    if (updates.name !== undefined) target.name = String(updates.name).trim();
+    if (updates.username !== undefined) target.username = String(updates.username).trim();
+    if (updates.email !== undefined) target.email = String(updates.email).trim();
+    if (updates.phone !== undefined) target.phone = String(updates.phone).trim();
+    if (updates.title !== undefined) target.title = String(updates.title).trim();
+    if (updates.division !== undefined) target.division = String(updates.division).trim();
+    if (updates.avatarInitials !== undefined) target.avatarInitials = String(updates.avatarInitials).trim().toUpperCase().slice(0, 2);
+    if (updates.badgeColor !== undefined) target.badgeColor = updates.badgeColor;
+    if (updates.active !== undefined) target.active = Boolean(updates.active);
+    if (updates.role !== undefined) {
+      target.role = updates.role;
+      const sqlMap = {
+        'super-admin': 'super_admin',
+        'executive': 'direktur',
+        'inventory': 'admin_gudang',
+        'sales-ops': 'admin_penjualan',
+        'field-sales': 'sales'
+      };
+      target.sqlRole = sqlMap[updates.role] || 'sales';
+    }
+    if (Array.isArray(updates.permissions)) {
+      target.permissions = updates.permissions;
+    }
+    if (updates.defaultPath !== undefined) {
+      target.defaultPath = updates.defaultPath;
+    }
+    if (updates.password !== undefined && String(updates.password).trim() !== '') {
+      target.password = String(updates.password).trim();
+    }
+    if (updates.pin !== undefined && String(updates.pin).trim() !== '') {
+      target.pin = String(updates.pin).trim();
+    }
+
+    // Jika user ini adalah Sales Lapangan dan namanya berubah, sinkronkan salesRepName & salesTeam
+    if (target.role === 'field-sales' && updates.name) {
+      target.salesRepName = target.name;
+      const repTeam = (state.salesTeam || []).find(s => s.id === target.salesRepId || s.name === oldSalesName);
+      if (repTeam) repTeam.name = target.name;
+      if (state.currentSalesRep === oldSalesName) state.currentSalesRep = target.name;
+    }
+
+    // Jika yang diedit adalah user yang sedang login, perbarui state.currentUser
+    if (state.currentUser && state.currentUser.id === userId) {
+      state.currentUser = JSON.parse(JSON.stringify(target));
+      state.currentRole = target.role;
+    }
+
+    showToast(`Detail profil ${target.name} berhasil diperbarui!`, 'manage_accounts');
+    notify();
+    syncMutationToServer('UPDATE_USER', { userId, user: target }, `Update Profil User: ${target.name}`);
+    return { ok: true, user: target };
+  }
+
+  function changeUserPassword(userId, currentPassword, newPassword, newPin, isSuperAdminOverride) {
+    const target = (state.users || []).find(u => u.id === userId);
+    if (!target) return { ok: false, message: 'Akun pengguna tidak ditemukan.' };
+
+    if (!isSuperAdminOverride) {
+      const cur = String(currentPassword || '').trim();
+      if (cur !== target.password && cur !== target.pin) {
+        return { ok: false, message: 'Password saat ini tidak sesuai!' };
+      }
+    }
+
+    const nextPw = String(newPassword || '').trim();
+    if (!nextPw || nextPw.length < 3) {
+      return { ok: false, message: 'Password baru minimal harus 3 karakter.' };
+    }
+
+    target.password = nextPw;
+    if (newPin && String(newPin).trim().length >= 4) {
+      target.pin = String(newPin).trim();
+    }
+
+    if (state.currentUser && state.currentUser.id === userId) {
+      state.currentUser = JSON.parse(JSON.stringify(target));
+    }
+
+    showToast(`Password untuk akun ${target.name} berhasil diperbarui!`, 'lock_reset');
+    notify();
+    syncMutationToServer('CHANGE_USER_PASSWORD', { userId, newPassword: target.password, newPin: target.pin }, `Ganti Password: ${target.name}`);
+    return { ok: true, user: target };
+  }
+
+  function createNewUser(userData) {
+    const id = userData.id || `USR-${Math.floor(100 + Math.random() * 900)}`;
+    const role = userData.role || 'field-sales';
+    const sqlMap = {
+      'super-admin': 'super_admin',
+      'executive': 'direktur',
+      'inventory': 'admin_gudang',
+      'sales-ops': 'admin_penjualan',
+      'field-sales': 'sales'
+    };
+    const defaultPathMap = {
+      'super-admin': 'user-management',
+      'executive': 'executive-dashboard',
+      'inventory': 'inventory-stock-ledger',
+      'sales-ops': 'order-approval-queue',
+      'field-sales': 'field-sales-pwa-preview'
+    };
+    const defaultPermsMap = {
+      'super-admin': ['executive-dashboard', 'inventory-stock-ledger', 'b2b-crm-directory', 'order-approval-queue', 'field-sales-pwa-preview', 'user-management', 'user-profile-settings'],
+      'executive': ['executive-dashboard', 'inventory-stock-ledger', 'b2b-crm-directory', 'order-approval-queue', 'user-profile-settings'],
+      'inventory': ['inventory-stock-ledger', 'order-approval-queue', 'user-profile-settings'],
+      'sales-ops': ['order-approval-queue', 'b2b-crm-directory', 'user-profile-settings'],
+      'field-sales': ['field-sales-pwa-preview', 'b2b-crm-directory', 'user-profile-settings']
+    };
+
+    const name = String(userData.name || 'User Baru').trim();
+    const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() || 'US';
+    const newUser = {
+      id,
+      name,
+      username: String(userData.username || name.toLowerCase().replace(/[^a-z0-9]/g, '')).trim(),
+      email: String(userData.email || `${name.toLowerCase().replace(/[^a-z0-9]/g, '.')}@arbain.co.id`).trim(),
+      phone: String(userData.phone || '081200000000').trim(),
+      password: String(userData.password || '123').trim(),
+      pin: String(userData.pin || '123456').trim(),
+      role,
+      sqlRole: sqlMap[role] || 'sales',
+      salesRepName: role === 'field-sales' ? name : undefined,
+      salesRepId: role === 'field-sales' ? id : undefined,
+      title: String(userData.title || (role === 'field-sales' ? 'Field Sales Representative' : 'Staf Operasional')).trim(),
+      division: String(userData.division || 'CV Arba\'in Solo Raya').trim(),
+      avatarInitials: initials,
+      badgeColor: userData.badgeColor || '#005c55',
+      active: true,
+      defaultPath: userData.defaultPath || defaultPathMap[role] || 'user-profile-settings',
+      permissions: Array.isArray(userData.permissions) && userData.permissions.length
+        ? userData.permissions
+        : defaultPermsMap[role]
+    };
+
+    state.users = [newUser, ...(state.users || [])];
+    if (role === 'field-sales') {
+      state.salesTeam.push({
+        id,
+        name,
+        division: newUser.division,
+        area: 'Solo Raya',
+        dailyVisitTarget: 15,
+        monthlyRevenueTarget: 50000000,
+        monthlyRevenueBase: 0,
+        monthlyVisitBase: 0
+      });
+    }
+
+    showToast(`Akun baru ${newUser.name} (${newUser.username}) berhasil ditambahkan!`, 'person_add');
+    notify();
+    syncMutationToServer('CREATE_USER', { user: newUser }, `Tambah User Baru: ${newUser.name} (${newUser.role})`);
+    return { ok: true, user: newUser };
+  }
+
+  function deleteUser(userId) {
+    if (userId === 'USR-SUPER-01') {
+      showToast('Akun Super Admin utama tidak dapat dihapus!', 'warning');
+      return { ok: false, message: 'Akun Super Admin utama dilindungi.' };
+    }
+    if (state.currentUser && state.currentUser.id === userId) {
+      showToast('Tidak dapat menghapus akun yang sedang digunakan login!', 'warning');
+      return { ok: false, message: 'Tidak dapat menghapus akun yang sedang aktif.' };
+    }
+    const target = (state.users || []).find(u => u.id === userId);
+    if (!target) return { ok: false, message: 'User tidak ditemukan.' };
+    state.users = (state.users || []).filter(u => u.id !== userId);
+    showToast(`Akun ${target.name} telah dihapus dari sistem.`, 'person_remove');
+    notify();
+    syncMutationToServer('DELETE_USER', { userId }, `Hapus User: ${target.name}`);
+    return { ok: true };
   }
 
   function toggleSidebar() {
@@ -347,16 +634,78 @@ window.ArbaStore = (function() {
     notify();
   }
 
-  function toggleOnlineStatus() {
-    state.isOnline = !state.isOnline;
+  function syncMutationToServer(type, payload, summary) {
+    if (window.ArbaOfflineSync && typeof window.ArbaOfflineSync.recordOrSyncMutation === 'function') {
+      window.ArbaOfflineSync.recordOrSyncMutation(type, payload, summary);
+    }
+  }
+
+  function addOfflineQueueEntry(mutation) {
+    const id = mutation.mutationId || mutation.id;
+    if (!id) return;
+    const exists = state.offlineQueue.some(q => (q.mutationId || q.id) === id);
+    if (!exists) {
+      state.offlineQueue = [{
+        id,
+        mutationId: id,
+        type: mutation.type,
+        summary: mutation.summary || mutation.type,
+        payload: mutation.payload,
+        createdAt: mutation.createdAt || Date.now()
+      }, ...state.offlineQueue];
+      persist();
+    }
+  }
+
+  function restoreOfflineQueue(idbMutations) {
+    if (!Array.isArray(idbMutations) || !idbMutations.length) return;
+    idbMutations.forEach(m => addOfflineQueueEntry(m));
+    notify();
+  }
+
+  function applyServerState(centralState, options) {
+    options = options || {};
+    if (!centralState) return;
+    if (Array.isArray(centralState.users) && centralState.users.length > 0) {
+      state.users = centralState.users;
+      if (state.currentUser) {
+        const refreshed = state.users.find(u => u.id === state.currentUser.id);
+        if (refreshed) state.currentUser = JSON.parse(JSON.stringify(refreshed));
+      }
+    }
+    if (Array.isArray(centralState.products)) state.products = centralState.products;
+    if (Array.isArray(centralState.ledger)) state.ledger = centralState.ledger;
+    if (Array.isArray(centralState.outlets)) state.outlets = centralState.outlets;
+    if (Array.isArray(centralState.orders)) state.orders = centralState.orders;
+    if (Array.isArray(centralState.supplierPOs)) state.supplierPOs = centralState.supplierPOs;
+    if (Array.isArray(centralState.salesVisits)) state.salesVisits = centralState.salesVisits;
+    if (Array.isArray(centralState.driverManifests)) state.driverManifests = centralState.driverManifests;
+    if (Array.isArray(centralState.salesTeam)) state.salesTeam = centralState.salesTeam;
+    if (Array.isArray(centralState.salesLoadings)) state.salesLoadings = centralState.salesLoadings;
+    if (Array.isArray(centralState.visitLogs)) state.visitLogs = centralState.visitLogs;
+
+    if (options.clearQueue) {
+      state.offlineQueue = [];
+    }
+    if (options.toastMessage) {
+      showToast(options.toastMessage, 'cloud_done');
+    }
+    notify();
+  }
+
+  function setNetworkOnlineState(nextOnline, opts) {
+    opts = opts || {};
+    if (state.isOnline === nextOnline && !opts.force) return;
+    state.isOnline = nextOnline;
 
     if (state.isOnline && state.offlineQueue.length > 0) {
-      // Sinkronisasi antrean offline: potong stok otomatis untuk setiap pesanan
+      // Sinkronisasi antrean offline: potong stok otomatis untuk setiap pesanan lokal
       let lowHits = [];
       let waiting = 0;
-      const queuedIds = state.offlineQueue.map(q => q.id);
+      const queuedIds = state.offlineQueue.map(q => q.id || q.mutationId);
       state.orders.forEach(o => {
-        if (queuedIds.indexOf(o.id) === -1 || o.syncStatus !== 'OFFLINE_QUEUED') return;
+        if (queuedIds.indexOf(o.id) === -1 && o.syncStatus !== 'OFFLINE_QUEUED') return;
+        if (o.syncStatus !== 'OFFLINE_QUEUED') return;
         const shortages = checkStockAvailability(o.items);
         if (shortages.length === 0) {
           lowHits = lowHits.concat(deductOrderStock(o));
@@ -367,21 +716,43 @@ window.ArbaStore = (function() {
         }
       });
       const count = state.offlineQueue.length;
+      if (window.ArbaOfflineSync && typeof window.ArbaOfflineSync.flushOfflineQueue === 'function') {
+        window.ArbaOfflineSync.flushOfflineQueue();
+        window.ArbaOfflineSync.connectRealtimeSSE();
+      }
       state.offlineQueue = [];
       showToast(
-        `Online kembali: ${count} pesanan lokal disinkronisasi & stok dipotong otomatis` +
+        `Online kembali: ${count} transaksi lokal dikirim ke Server Pusat & stok dipotong otomatis` +
         (waiting ? ` (${waiting} menunggu stok)` : '') + '.' + lowStockMessage(lowHits),
         'cloud_done'
       );
     } else {
+      if (state.isOnline && window.ArbaOfflineSync) {
+        window.ArbaOfflineSync.flushOfflineQueue();
+        window.ArbaOfflineSync.connectRealtimeSSE();
+      }
       showToast(
         state.isOnline
-          ? 'Status: Online - Semua data tersinkronisasi instan'
-          : 'Status: Offline - Transaksi disimpan di IndexedDB / LocalStorage lokal',
+          ? (opts.fromBrowserEvent ? 'Sinyal internet terhubung kembali — sinkronisasi pusat aktif' : 'Status: Online - Terhubung ke Database Pusat secara real-time')
+          : (opts.fromBrowserEvent ? 'Koneksi terputus — otomatis beralih ke penyimpanan lokal (IndexedDB)' : 'Status: Offline - Transaksi disimpan di IndexedDB & LocalStorage lokal'),
         state.isOnline ? 'cloud_done' : 'cloud_off'
       );
     }
     notify();
+  }
+
+  function toggleOnlineStatus() {
+    setNetworkOnlineState(!state.isOnline, { force: true });
+  }
+
+  async function syncNow() {
+    if (!state.isOnline) {
+      setNetworkOnlineState(true, { force: true });
+      return;
+    }
+    if (window.ArbaOfflineSync && typeof window.ArbaOfflineSync.flushOfflineQueue === 'function') {
+      await window.ArbaOfflineSync.flushOfflineQueue({ showToastIfEmpty: true });
+    }
   }
 
   function setSelectedOutletId(id) {
@@ -401,6 +772,17 @@ window.ArbaStore = (function() {
       prod.status = newStock >= prod.rop ? 'optimal' : 'below-rop';
     }
 
+    // Jika docRef merujuk ke PO Supplier yang sedang aktif, tandai status PO sebagai DITERIMA
+    if (docRef && Array.isArray(state.supplierPOs)) {
+      const targetPO = state.supplierPOs.find(po => po.id === docRef);
+      if (targetPO) {
+        targetPO.status = 'DITERIMA';
+      }
+    }
+
+    const operatorName = (state.currentUser && state.currentUser.name) || 'Slamet Riadi';
+    const operatorTitle = (state.currentUser && state.currentUser.title) || 'Warehouse Inbound';
+
     const newEntry = {
       id: `LEDG-${Math.floor(10000 + Math.random() * 90000)}`,
       timestamp: nowStamp(),
@@ -411,14 +793,15 @@ window.ArbaStore = (function() {
       type: 'MASUK',
       quantity: qty,
       finalStock: newStock,
-      operator: 'Slamet Riadi',
-      operatorRole: 'Warehouse Inbound',
+      operator: operatorName,
+      operatorRole: operatorTitle,
       hash: `${Math.random().toString(36).substring(2, 6)}...${Math.random().toString(36).substring(2, 6)}`
     };
 
     state.ledger = [newEntry, ...state.ledger];
     showToast(`Penerimaan +${qty} unit (${batch}) berhasil dicatat ke Ledger!`, 'check_circle');
     notify();
+    syncMutationToServer('ADD_INBOUND_BATCH', { sku, batch, qty, expiryDate, docRef, ledgerEntry: newEntry }, `Inbound +${qty} unit ${prodName} (${batch})`);
   }
 
   function approveOrder(orderId, silent) {
@@ -437,6 +820,7 @@ window.ArbaStore = (function() {
     if (!silent) {
       showToast(`Pesanan ${order.outletName} disetujui & dialokasikan ke armada.${lowStockMessage(lowHits)}`, 'task_alt');
       notify();
+      syncMutationToServer('APPROVE_ORDER', { orderId: order.id, clientUuid: order.clientUuid }, `Otorisasi Pesanan ${order.outletName}`);
     }
     return lowHits;
   }
@@ -446,6 +830,7 @@ window.ArbaStore = (function() {
     orderIds.forEach(id => { lowHits = lowHits.concat(approveOrder(id, true) || []); });
     showToast(`${orderIds.length} pesanan berhasil disetujui & dialokasikan ke armada!${lowStockMessage(lowHits)}`, 'done_all');
     notify();
+    syncMutationToServer('BATCH_APPROVE_ORDERS', { orderIds }, `Otorisasi Massal ${orderIds.length} Pesanan`);
   }
 
   function rejectOrder(orderId, reason) {
@@ -456,6 +841,7 @@ window.ArbaStore = (function() {
       order.status = 'REJECTED';
       showToast(`Pesanan #${orderId} ditolak: ${reason || 'Pembatalan manual'}${order.stockDeducted === false ? ' — stok dikembalikan' : ''}`, 'block');
       notify();
+      syncMutationToServer('REJECT_ORDER', { orderId: order.id, reason }, `Tolak Pesanan ${order.outletName}`);
     }
   }
 
@@ -477,6 +863,7 @@ window.ArbaStore = (function() {
 
     showToast(`Batch dialihkan ke ${newBatch} (${sourceWarehouse}). Pesanan siap disetujui!`, 'swap_horiz');
     notify();
+    syncMutationToServer('SUBSTITUTE_BATCH', { orderId, sku, newBatch, sourceWarehouse }, `Substitusi Batch ${newBatch}`);
   }
 
   function adjustOrderQuantity({ orderId, sku, newQty }) {
@@ -497,6 +884,7 @@ window.ArbaStore = (function() {
 
     showToast(`Kuantitas SKU disesuaikan menjadi ${newQty} unit!`, 'tune');
     notify();
+    syncMutationToServer('ADJUST_ORDER_QTY', { orderId, sku, newQty }, `Ubah Qty Order #${orderId}`);
   }
 
   function adjustStock({ sku, batch, quantityDelta, reason, auditorName }) {
@@ -527,6 +915,7 @@ window.ArbaStore = (function() {
     state.ledger = [newEntry, ...state.ledger];
     showToast(`Penyesuaian stok (${quantityDelta > 0 ? '+' : ''}${quantityDelta} unit) dicatat ke Ledger: ${reason}`, 'tune');
     notify();
+    syncMutationToServer('ADJUST_STOCK', { sku, batch, quantityDelta, reason, auditorName, ledgerEntry: newEntry }, `Penyesuaian Stok ${prodName} (${quantityDelta})`);
   }
 
   function createSupplierPO({ sku, productName, vendorName, quantity, unitPrice, leadTimeDays }) {
@@ -550,6 +939,7 @@ window.ArbaStore = (function() {
     state.supplierPOs = [newPO, ...state.supplierPOs];
     showToast(`PO Supplier ${newPO.id} berhasil diterbitkan ke ${vendorName}!`, 'local_mall');
     notify();
+    syncMutationToServer('CREATE_SUPPLIER_PO', { po: newPO }, `PO Supplier ${newPO.id} (${productName})`);
   }
 
   function scheduleSalesVisit(params) {
@@ -569,6 +959,7 @@ window.ArbaStore = (function() {
 
     showToast(`Kunjungan ke ${params.outletName} dijadwalkan pada ${params.scheduledDate}`, 'event_available');
     notify();
+    syncMutationToServer('SCHEDULE_VISIT', { visit: newVisit }, `Jadwal Kunjungan ${params.outletName}`);
   }
 
   function markOrderDelivered(orderId, driverName) {
@@ -587,6 +978,7 @@ window.ArbaStore = (function() {
 
     showToast(`Bukti Serah Terima (POD) berhasil dicatat oleh Driver ${driverName}!`, 'verified');
     notify();
+    syncMutationToServer('MARK_DELIVERED', { orderId, driverName }, `POD Pengiriman #${orderId} (${driverName})`);
   }
 
   function addOutlet(newOutlet) {
@@ -622,6 +1014,7 @@ window.ArbaStore = (function() {
     state.selectedOutletId = id;
     showToast(`Outlet ${fullOutlet.name} (${id}) berhasil didaftarkan!`, 'add_business');
     notify();
+    syncMutationToServer('ADD_OUTLET', { outlet: fullOutlet }, `Registrasi Outlet ${fullOutlet.name}`);
   }
 
   function submitFieldSalesOrder(newOrder) {
@@ -671,7 +1064,14 @@ window.ArbaStore = (function() {
         orderObj.stockWarning = 'Menunggu stok: ' + shortages.map(s => `${s.name} (kurang ${s.shortBy} unit)`).join(', ');
       }
     } else {
-      state.offlineQueue = [{ id: orderObj.id, createdAt: Date.now() }, ...state.offlineQueue];
+      state.offlineQueue = [{
+        id: orderObj.id,
+        mutationId: orderObj.clientUuid,
+        type: 'SUBMIT_ORDER',
+        summary: `Order ${orderObj.outletName} (${items.length} SKU • ${window.ArbaUtils ? window.ArbaUtils.formatRupiah(totalAmount) : totalAmount})`,
+        payload: { order: orderObj },
+        createdAt: Date.now()
+      }, ...state.offlineQueue];
     }
 
     // 2) Kredit outlet, stok titipan konsinyasi di apotek & barang bawaan sales
@@ -728,7 +1128,7 @@ window.ArbaStore = (function() {
     state.orders = [orderObj, ...state.orders];
 
     // 3) Catat aktivitas kunjungan (hasil: ORDER) untuk KPI produktivitas sales
-    recordVisit({
+    const visitLog = recordVisit({
       salesRep: orderObj.salesRep,
       outletId: orderObj.outletId,
       outletName: orderObj.outletName,
@@ -748,6 +1148,13 @@ window.ArbaStore = (function() {
     }
     showToast(msg, !state.isOnline ? 'save' : (shortages.length || lowHits.length ? 'warning' : 'cloud_done'));
     notify();
+
+    syncMutationToServer(
+      'SUBMIT_ORDER',
+      { id: orderObj.id, clientUuid: orderObj.clientUuid, order: orderObj, visitLog },
+      `Order ${orderObj.outletName} (${items.length} SKU • ${window.ArbaUtils ? window.ArbaUtils.formatRupiah(totalAmount) : totalAmount}) oleh ${orderObj.salesRep}`
+    );
+
     return { order: orderObj, shortages, lowStock: lowHits };
   }
 
@@ -795,11 +1202,19 @@ window.ArbaStore = (function() {
     const log = recordVisit(params);
     showToast(`Kunjungan ${log.outletName} tercatat: ${VISIT_OUTCOME_LABELS[log.outcome]}`, 'where_to_vote');
     notify();
+    syncMutationToServer('LOG_VISIT', { id: log.id, visitLog: log }, `Kunjungan ${log.outletName}: ${VISIT_OUTCOME_LABELS[log.outcome]} (${log.salesRep})`);
     return log;
   }
 
   function setCurrentSalesRep(name) {
     state.currentSalesRep = name;
+    if (state.currentRole === 'field-sales') {
+      const allUsers = state.users || (window.ArbaData && window.ArbaData.users) || [];
+      const repUser = allUsers.find(u => u.salesRepName === name);
+      if (repUser) {
+        state.currentUser = repUser;
+      }
+    }
     notify();
   }
 
@@ -851,6 +1266,7 @@ window.ArbaStore = (function() {
 
     showToast(`Tercatat: ${rep.name} membawa ${qty} unit ${prod.name} dari gudang.`, 'local_shipping');
     notify();
+    syncMutationToServer('RECORD_WAREHOUSE_LOAD', { salesRep: rep.name, sku: prod.sku, loadedQty: qty }, `Loading Gudang ${rep.name}: +${qty} ${prod.name}`);
   }
 
   function reconcileSalesLoading(loadId, actualReturnedMap) {
@@ -878,6 +1294,7 @@ window.ArbaStore = (function() {
       showToast(`PERINGATAN AUDIT: Selisih ${totalDiscrepancy} unit pada bawaan ${loadRec.salesRep}!`, 'warning');
     }
     notify();
+    syncMutationToServer('RECONCILE_LOADING', { loadId, actualReturnedMap }, `Rekonsiliasi Bawaan ${loadRec.salesRep}`);
   }
 
   // ---------------------------------------------------------------------------
@@ -945,6 +1362,7 @@ window.ArbaStore = (function() {
     if (result.added || result.updated) {
       showToast(`Migrasi outlet selesai: ${result.added} baru, ${result.updated} diperbarui${result.errors.length ? `, ${result.errors.length} baris gagal` : ''}`, 'upload_file');
       notify();
+      syncMutationToServer('IMPORT_OUTLETS', { rows }, `Impor CSV Outlet (${result.added} baru, ${result.updated} update)`);
     }
     return result;
   }
@@ -1015,6 +1433,7 @@ window.ArbaStore = (function() {
       const below = state.products.filter(p => p.stock <= p.rop).length;
       showToast(`Migrasi produk selesai: ${result.added} baru, ${result.updated} diperbarui. ${below} SKU di bawah ROP.`, 'upload_file');
       notify();
+      syncMutationToServer('IMPORT_PRODUCTS', { rows }, `Impor CSV Produk (${result.added} baru, ${result.updated} update)`);
     }
     return result;
   }
@@ -1231,8 +1650,11 @@ window.ArbaStore = (function() {
     };
   }
 
-  function resetToDefaults() {
+  async function resetToDefaults() {
     localStorage.removeItem(STORAGE_KEY);
+    if (window.ArbaOfflineSync && typeof window.ArbaOfflineSync.resetCentralServer === 'function') {
+      await window.ArbaOfflineSync.resetCentralServer();
+    }
     location.reload();
   }
 
@@ -1247,9 +1669,21 @@ window.ArbaStore = (function() {
     notify,
     setPath,
     setRole,
+    loginUser,
+    logoutUser,
+    getAllowedPathsForUser,
+    updateUserProfile,
+    changeUserPassword,
+    createNewUser,
+    deleteUser,
     toggleSidebar,
     toggleDarkMode,
     toggleOnlineStatus,
+    setNetworkOnlineState,
+    syncNow,
+    applyServerState,
+    addOfflineQueueEntry,
+    restoreOfflineQueue,
     setSelectedOutletId,
     showToast,
     addInboundBatch,
