@@ -30,7 +30,7 @@
       "name": "Field Sales PWA (Lapangan)",
       "short_name": "Sales PWA",
       "description": "Buka aplikasi input order & check-in GPS sales lapangan",
-      "url": "./index.html?pwa=full#field-sales-pwa-preview",
+      "url": "./index.html#field-sales-pwa-preview",
       "icons": [{ "src": "icons/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml" }]
     },
     {

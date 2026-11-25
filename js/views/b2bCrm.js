@@ -1,16 +1,5 @@
 /**
- * ArbaConnect ERP - B2B CRM & Directory View
- * Features:
- * - 4 CRM KPI Cards
- * - Multi-criteria filter bar (Search, Region Solo Raya, Type, Credit Status, Sales Route chips)
- * - 8-Col Interactive Master Table with credit gauge bar & click-to-select
- * - 4-Col Side Drawer with SVG Sparkline, credit line, PIC block, and field log
- * - Modals:
- *   1. + Daftarkan Outlet Baru (Registration with auto code)
- *   2. WhatsApp PIC Communication Assistant (3 Templates + wa.me)
- *   3. Schedule Sales Rep Visit (Rencana Kunjungan)
- *   4. Invoice & Order History Modal with print preview
- * - CSV Export
+ * ArbaConnect ERP - B2B CRM & Outlet Directory View
  */
 
 (function () {
@@ -30,18 +19,20 @@
 
   function renderB2bCrm(container) {
     var appState = window.ArbaStore.getState();
-    var outlets = appState.outlets;
+    var outlets = appState.outlets || [];
+    var salesTeam = appState.salesTeam || [];
     var selectedOutletId = appState.selectedOutletId;
 
     var selectedOutlet = outlets.find(function (o) { return o.id === selectedOutletId; }) || outlets[0];
 
-    // Filter outlets
     var filteredOutlets = outlets.filter(function (outlet) {
+      var q = state.searchQuery.toLowerCase();
       var matchesSearch =
-        outlet.name.toLowerCase().indexOf(state.searchQuery.toLowerCase()) !== -1 ||
-        outlet.code.toLowerCase().indexOf(state.searchQuery.toLowerCase()) !== -1 ||
-        outlet.picName.toLowerCase().indexOf(state.searchQuery.toLowerCase()) !== -1 ||
-        outlet.address.toLowerCase().indexOf(state.searchQuery.toLowerCase()) !== -1;
+        !q ||
+        outlet.name.toLowerCase().indexOf(q) !== -1 ||
+        outlet.code.toLowerCase().indexOf(q) !== -1 ||
+        outlet.picName.toLowerCase().indexOf(q) !== -1 ||
+        outlet.address.toLowerCase().indexOf(q) !== -1;
 
       var matchesRegion = state.selectedRegion === 'ALL' || outlet.city === state.selectedRegion;
       var matchesType = state.selectedType === 'ALL' || outlet.type === state.selectedType;
@@ -60,488 +51,259 @@
       state.crmPage * state.crmPageSize
     );
 
-    var percentRemaining = selectedOutlet
-      ? Math.round((selectedOutlet.creditRemaining / selectedOutlet.creditLimit) * 100)
-      : 100;
+    // Live KPI computations
+    var minimarketCount = outlets.filter(function (o) { return o.type === 'Minimarket'; }).length;
+    var apotekCount = outlets.length - minimarketCount;
+    var lancarCount = outlets.filter(function (o) { return o.creditStatus === 'Lancar'; }).length;
+    var attentionCount = outlets.filter(function (o) { return o.creditStatus === 'Perhatian'; }).length;
+    var overdueCount = outlets.filter(function (o) { return o.creditStatus === 'Overdue'; }).length;
+    var creditHealthPct = outlets.length ? Math.round((lancarCount / outlets.length) * 1000) / 10 : 100;
 
     var activeRole = (appState.currentUser && appState.currentUser.role === 'super-admin')
       ? (appState.currentRole || 'super-admin')
       : (appState.currentUser ? appState.currentUser.role : 'executive');
     var isSalesRole = activeRole === 'field-sales';
-    var isSalesOpsRole = activeRole === 'sales-ops';
 
-    var crmTitle = isSalesRole
-      ? 'Daftar Apotek Langganan & Rute Kunjungan Saya (' + (appState.currentUser ? appState.currentUser.name : 'Sales') + ')'
-      : isSalesOpsRole
-      ? 'Data Pelanggan Apotek, Evaluasi Plafon Kredit & Tagihan Konsinyasi'
-      : 'Direktori Kemitraan Apotek, Plafon Kredit & Barang Titipan Solo Raya';
-
-    var crmSubtitle = isSalesRole
-      ? 'Lihat sisa barang titipan (konsinyasi) di apotek rayon Anda, cek nomor WA Apoteker, lihat urutan rute kunjungan terdekat, atau buka aplikasi input nota.'
-      : isSalesOpsRole
-      ? 'Pantau kelancaran bayar apotek, evaluasi skor kelayakan plafon kredit, tagih barang titipan yang sudah laku, dan geser stok yang macet.'
-      : 'Pusat data seluruh apotek dan toko obat mitra CV Arba\'in, pemantauan batas plafon kredit, serta perputaran barang konsinyasi.';
+    var routeReps = salesTeam.slice(0, 4);
 
     var html = `
-      <div class="flex flex-col w-full gap-space-lg">
-        <!-- Header Title & Action Toolbar (Disesuaikan dengan Role Pengguna) -->
-        <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div class="flex flex-col">
-            <div class="flex items-center gap-2 text-on-surface-variant text-xs mb-1 font-medium">
-              <span>Distribusi Herbal Solo Raya</span>
-              <span aria-hidden="true">·</span>
-              <span class="text-primary font-semibold">${isSalesRole ? 'Rute &amp; Apotek Pegangan Sales' : isSalesOpsRole ? 'Administrasi Penjualan &amp; Piutang' : 'Manajemen Kemitraan Apotek'}</span>
-              <span aria-hidden="true">·</span>
-              <span>Sistem Titip Jual (Konsinyasi)</span>
-            </div>
-            <h1 class="text-2xl text-on-surface tracking-tight font-bold">
-              ${crmTitle}
-            </h1>
-            <p class="text-sm text-on-surface-variant max-w-4xl mt-0.5">
-              ${crmSubtitle}
-            </p>
+      <div class="flex flex-col w-full gap-space-lg pb-space-xl">
+        <!-- Page Header -->
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Mitra Outlet</h1>
+            <p class="page-meta">Direktori apotek, minimarket, kredit &amp; konsinyasi Solo Raya</p>
           </div>
           <div class="flex items-center gap-2 flex-wrap">
-            <button
-              id="btn-crm-rebalancer"
-              class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-colors cursor-pointer border"
-              style="background:#fffbeb; color:#b45309; border-color:#fcd34d;"
-              type="button"
-              title="Rekomendasi Tarik & Geser Stok Titipan yang Macet / Hampir Kedaluwarsa ke Apotek Lain yang Laris"
-            >
-              <span class="material-symbols-outlined text-[16px]">swap_driving_apps_wheel</span>
-              <span>Tarik &amp; Geser Stok Macet (${(window.ArbaStore.getConsignmentRebalanceRecommendations() || []).length})</span>
+            <button id="btn-crm-rebalancer" class="btn btn-outline" type="button">
+              <span class="material-symbols-outlined text-[16px]">swap_horiz</span>
+              <span>Mutasi Konsinyasi (${(window.ArbaStore.getConsignmentRebalanceRecommendations() || []).length})</span>
             </button>
             ${!isSalesRole ? `
-              <button
-                id="btn-crm-credit-score"
-                class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-colors cursor-pointer border"
-                style="background:#f5f3ff; color:#6d28d9; border-color:#ddd6fe;"
-                type="button"
-                title="Penilaian Kelayakan Plafon Kredit & Kesehatan Bayar Apotek (Skor 0-100)"
-              >
+              <button id="btn-crm-credit-score" class="btn btn-outline" type="button">
                 <span class="material-symbols-outlined text-[16px]">analytics</span>
-                <span>Skor Kelayakan Kredit</span>
+                <span>Skor Kredit</span>
               </button>
             ` : ''}
-            <button
-              id="btn-crm-tsp-map"
-              class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-colors cursor-pointer border"
-              style="background:#ecfdf5; color:#047857; border-color:#a7f3d0;"
-              type="button"
-              title="Peta Lokasi Apotek & Urutan Rute Kunjungan Terdekat (Hemat Jarak & BBM)"
-            >
+            <button id="btn-crm-tsp-map" class="btn btn-outline" type="button">
               <span class="material-symbols-outlined text-[16px]">route</span>
-              <span>${isSalesRole ? 'Peta Urutan Rute Saya' : 'Peta &amp; Rute Kunjungan'}</span>
+              <span>Peta Rute</span>
             </button>
             ${!isSalesRole ? `
-              <button
-                id="btn-import-crm-csv"
-                class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface-container-low text-primary hover:bg-surface-container text-xs font-semibold transition-colors border border-border-subtle/50 cursor-pointer"
-                type="button"
-                title="Impor Data Awal Apotek dari File CSV"
-              >
+              <button id="btn-import-crm-csv" class="btn btn-outline" type="button">
                 <span class="material-symbols-outlined text-[16px]">upload_file</span>
-                <span>Impor Data CSV</span>
+                <span>Impor CSV</span>
               </button>
             ` : ''}
-            <button
-              id="btn-export-crm-csv"
-              class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface-container-low text-on-surface hover:bg-surface-container text-xs font-semibold transition-colors border border-border-subtle/50 cursor-pointer"
-              type="button"
-            >
+            <button id="btn-export-crm-csv" class="btn btn-outline" type="button">
               <span class="material-symbols-outlined text-[16px]">file_download</span>
-              <span>Unduh Data Apotek</span>
+              <span>Ekspor CSV</span>
             </button>
-            <button
-              id="btn-new-outlet"
-              class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-white hover:bg-primary-container text-xs font-semibold transition-colors shadow-xs cursor-pointer active:scale-95 border-0"
-              type="button"
-            >
+            <button id="btn-new-outlet" class="btn btn-primary" type="button">
               <span class="material-symbols-outlined text-[16px]">add_business</span>
-              <span>${isSalesRole ? '+ Usulkan Apotek Baru' : '+ Daftarkan Apotek Baru'}</span>
+              <span>Tambah Outlet</span>
             </button>
           </div>
         </div>
 
-        <!-- Summary Metrics Cards (4 Metrics Grid) -->
+        <!-- Live KPI Cards -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <!-- Card 1 -->
-          <div class="bg-surface-container-lowest p-5 rounded-xl border border-border-subtle/60 flex flex-col justify-between">
-            <div class="flex items-start justify-between">
-              <div class="flex flex-col">
-                <span class="text-xs text-on-surface-variant uppercase tracking-wider font-semibold">
-                  Total Mitra Terdaftar
-                </span>
-                <div class="flex items-baseline gap-1.5 mt-1">
-                  <span class="text-2xl text-on-surface font-bold">
-                    ${168 + (outlets.length - 6)}
-                  </span>
-                  <span class="text-xs text-on-surface-variant font-medium">Outlet</span>
-                </div>
+          <div class="kpi-card">
+            <div>
+              <div class="kpi-header">
+                <span class="kpi-title">Outlet Terkelola</span>
+                <span class="material-symbols-outlined text-primary text-[20px]">storefront</span>
               </div>
-              <div class="w-9 h-9 rounded-lg bg-surface-container-low flex items-center justify-center text-primary">
-                <span class="material-symbols-outlined text-[20px]">storefront</span>
-              </div>
+              <div class="kpi-value">${outlets.length} <span class="text-sm font-normal text-on-surface-variant">Outlet</span></div>
             </div>
-            <div class="mt-4 pt-2.5 flex items-center justify-between text-xs text-on-surface-variant border-t border-border-subtle/40">
-              <div class="flex items-center gap-1.5 text-emerald-700 font-semibold">
-                <span class="w-1.5 h-1.5 rounded-full bg-emerald-600" style="display:inline-block; width:6px; height:6px;"></span>
-                <span>148 Aktif</span>
-              </div>
-              <span class="text-on-surface-variant">20 Baru / Evaluasi</span>
+            <div class="kpi-footer">
+              <span class="text-emerald-700 font-semibold">${lancarCount} Kredit Lancar</span>
+              <span class="text-on-surface-variant">${attentionCount + overdueCount} Perhatian</span>
             </div>
           </div>
 
-          <!-- Card 2 -->
-          <div class="bg-surface-container-lowest p-5 rounded-xl border border-border-subtle/60 flex flex-col justify-between">
-            <div class="flex items-start justify-between">
-              <div class="flex flex-col">
-                <span class="text-xs text-on-surface-variant uppercase tracking-wider font-semibold">
-                  Jaringan Apotek
-                </span>
-                <div class="flex items-baseline gap-1.5 mt-1">
-                  <span class="text-2xl text-primary font-bold">104</span>
-                  <span class="text-xs text-on-surface-variant font-medium">Titik Relasi</span>
-                </div>
+          <div class="kpi-card">
+            <div>
+              <div class="kpi-header">
+                <span class="kpi-title">Apotek &amp; Farmasi</span>
+                <span class="material-symbols-outlined text-primary text-[20px]">medication</span>
               </div>
-              <div class="w-9 h-9 rounded-lg bg-teal-50 flex items-center justify-center text-primary" style="background:#ccfbf1;">
-                <span class="material-symbols-outlined text-[20px]">medication</span>
-              </div>
+              <div class="kpi-value text-primary">${apotekCount} <span class="text-sm font-normal text-on-surface-variant">Apotek</span></div>
             </div>
-            <div class="mt-4 pt-2.5 flex items-center justify-between text-xs border-t border-border-subtle/40 text-on-surface-variant">
-              <span>Rata-rata termin:</span>
-              <span class="font-semibold text-primary">Net 30 Hari</span>
+            <div class="kpi-footer">
+              <span class="text-on-surface-variant">Porsi Mitra</span>
+              <span class="font-semibold text-primary">${outlets.length ? Math.round((apotekCount / outlets.length) * 100) : 0}%</span>
             </div>
           </div>
 
-          <!-- Card 3 -->
-          <div class="bg-surface-container-lowest p-5 rounded-xl border border-border-subtle/60 flex flex-col justify-between">
-            <div class="flex items-start justify-between">
-              <div class="flex flex-col">
-                <span class="text-xs text-on-surface-variant uppercase tracking-wider font-semibold">
-                  Minimarket &amp; Ritel
-                </span>
-                <div class="flex items-baseline gap-1.5 mt-1">
-                  <span class="text-2xl text-on-surface font-bold">64</span>
-                  <span class="text-xs text-on-surface-variant font-medium">Toko</span>
-                </div>
+          <div class="kpi-card">
+            <div>
+              <div class="kpi-header">
+                <span class="kpi-title">Minimarket &amp; Ritel</span>
+                <span class="material-symbols-outlined text-on-surface-variant text-[20px]">shopping_cart</span>
               </div>
-              <div class="w-9 h-9 rounded-lg bg-surface-container flex items-center justify-center text-on-surface-variant">
-                <span class="material-symbols-outlined text-[20px]">shopping_cart</span>
-              </div>
+              <div class="kpi-value">${minimarketCount} <span class="text-sm font-normal text-on-surface-variant">Toko</span></div>
             </div>
-            <div class="mt-4 pt-2.5 flex items-center justify-between text-xs border-t border-border-subtle/40 text-on-surface-variant">
-              <span>Rata-rata termin:</span>
-              <span class="font-semibold text-on-surface">Net 14 Hari</span>
+            <div class="kpi-footer">
+              <span class="text-on-surface-variant">Porsi Mitra</span>
+              <span class="font-semibold text-on-surface">${outlets.length ? Math.round((minimarketCount / outlets.length) * 100) : 0}%</span>
             </div>
           </div>
 
-          <!-- Card 4 -->
-          <div class="bg-surface-container-lowest p-5 rounded-xl border border-border-subtle/60 flex flex-col justify-between">
-            <div class="flex items-start justify-between">
-              <div class="flex flex-col">
-                <span class="text-xs text-on-surface-variant uppercase tracking-wider font-semibold">
-                  Kesehatan Kredit
-                </span>
-                <div class="flex items-baseline gap-1.5 mt-1">
-                  <span class="text-2xl text-emerald-700 font-bold">94.2%</span>
-                  <span class="text-xs font-semibold text-emerald-700">Optimal</span>
-                </div>
+          <div class="kpi-card">
+            <div>
+              <div class="kpi-header">
+                <span class="kpi-title">Kesehatan Kredit</span>
+                <span class="material-symbols-outlined text-emerald-700 text-[20px]">verified_user</span>
               </div>
-              <div class="w-9 h-9 rounded-lg bg-emerald-50 flex items-center justify-center text-emerald-700" style="background:#dcfce7;">
-                <span class="material-symbols-outlined text-[20px]">verified_user</span>
-              </div>
+              <div class="kpi-value text-emerald-700">${creditHealthPct}%</div>
             </div>
-            <div class="mt-4 pt-2.5 flex items-center justify-between text-xs border-t border-border-subtle/40 text-on-surface-variant">
-              <span class="text-amber-700 font-medium flex items-center gap-1">
-                <span class="material-symbols-outlined text-[14px]">warning</span>
-                5.8% Jatuh Tempo &lt;7 hari
-              </span>
-              <span class="text-on-surface-variant font-code-table font-mono">0 Bad Debt</span>
+            <div class="kpi-footer">
+              <span class="text-amber-700 font-medium">${attentionCount} Perhatian</span>
+              <span class="text-rose-600 font-semibold">${overdueCount} Overdue</span>
             </div>
           </div>
         </div>
 
-        <!-- Search, Filter & Segmentation Bar -->
-        <div class="bg-surface-container-lowest p-space-md rounded-xl shadow-xs border border-border-subtle/40 flex flex-col gap-space-sm">
-          <div class="grid grid-cols-1 md:grid-cols-12 gap-space-sm">
-            <!-- Search Field -->
-            <div class="md:col-span-5 relative flex items-center" style="grid-column: span 5 / span 12; position:relative;">
-              <span class="material-symbols-outlined absolute left-3 text-on-surface-variant text-[20px] pointer-events-none" style="position:absolute; left:0.75rem;">
-                search
-              </span>
+        <!-- Search & Filters -->
+        <div class="section-card flex flex-col gap-3">
+          <div class="grid grid-cols-1 md:grid-cols-12 gap-2.5">
+            <div class="md:col-span-5 relative flex items-center">
+              <span class="material-symbols-outlined absolute left-3 text-on-surface-variant text-[18px] pointer-events-none">search</span>
               <input
                 id="crm-search-input"
                 value="${window.ArbaUtils.escapeHtml(state.searchQuery)}"
-                class="w-full bg-surface-container-low text-on-surface placeholder:text-on-surface-variant pl-10 pr-4 py-2.5 rounded-lg text-body-md font-body-md focus:outline-none focus:bg-surface-container transition-all text-xs border-0"
-                style="padding-left: 2.25rem;"
-                placeholder="Cari nama apotek, kode outlet, atau nama apoteker..."
+                class="form-input pl-9"
+                placeholder="Cari outlet, kode, atau PIC..."
                 type="text"
               />
             </div>
 
-            <!-- Filter Wilayah Solo Raya -->
-            <div class="md:col-span-3 relative flex items-center" style="grid-column: span 3 / span 12; position:relative;">
-              <span class="material-symbols-outlined absolute left-3 text-on-surface-variant text-[18px] pointer-events-none" style="position:absolute; left:0.75rem;">
-                location_city
-              </span>
-              <select
-                id="crm-region-select"
-                class="w-full bg-surface-container-low text-on-surface pl-9 pr-8 py-2.5 rounded-lg text-body-md font-body-md appearance-none cursor-pointer focus:outline-none focus:bg-surface-container text-xs border-0"
-                style="padding-left: 2.25rem;"
-              >
-                <option value="ALL" ${state.selectedRegion === 'ALL' ? 'selected' : ''}>Semua Kota (Solo Raya)</option>
-                <option value="Solo" ${state.selectedRegion === 'Solo' ? 'selected' : ''}>Surakarta / Solo Kota</option>
-                <option value="Sukoharjo" ${state.selectedRegion === 'Sukoharjo' ? 'selected' : ''}>Sukoharjo &amp; Kartasura</option>
-                <option value="Karanganyar" ${state.selectedRegion === 'Karanganyar' ? 'selected' : ''}>Karanganyar &amp; Palur</option>
-                <option value="Klaten" ${state.selectedRegion === 'Klaten' ? 'selected' : ''}>Klaten Kota &amp; Delanggu</option>
+            <div class="md:col-span-3">
+              <select id="crm-region-select" class="form-select">
+                <option value="ALL" ${state.selectedRegion === 'ALL' ? 'selected' : ''}>Semua Kota</option>
+                <option value="Solo" ${state.selectedRegion === 'Solo' ? 'selected' : ''}>Surakarta / Solo</option>
+                <option value="Sukoharjo" ${state.selectedRegion === 'Sukoharjo' ? 'selected' : ''}>Sukoharjo</option>
+                <option value="Karanganyar" ${state.selectedRegion === 'Karanganyar' ? 'selected' : ''}>Karanganyar</option>
+                <option value="Klaten" ${state.selectedRegion === 'Klaten' ? 'selected' : ''}>Klaten</option>
                 <option value="Boyolali" ${state.selectedRegion === 'Boyolali' ? 'selected' : ''}>Boyolali</option>
                 <option value="Sragen" ${state.selectedRegion === 'Sragen' ? 'selected' : ''}>Sragen</option>
               </select>
             </div>
 
-            <!-- Filter Tipe Outlet -->
-            <div class="md:col-span-2 relative flex items-center" style="grid-column: span 2 / span 12; position:relative;">
-              <select
-                id="crm-type-select"
-                class="w-full bg-surface-container-low text-on-surface px-3 py-2.5 rounded-lg text-body-md font-body-md appearance-none cursor-pointer focus:outline-none focus:bg-surface-container text-xs border-0"
-              >
+            <div class="md:col-span-2">
+              <select id="crm-type-select" class="form-select">
                 <option value="ALL" ${state.selectedType === 'ALL' ? 'selected' : ''}>Semua Tipe</option>
                 <option value="Apotek Mandiri" ${state.selectedType === 'Apotek Mandiri' ? 'selected' : ''}>Apotek Mandiri</option>
                 <option value="Jaringan Farmasi" ${state.selectedType === 'Jaringan Farmasi' ? 'selected' : ''}>Jaringan Farmasi</option>
-                <option value="Minimarket" ${state.selectedType === 'Minimarket' ? 'selected' : ''}>Minimarket / Ritel</option>
+                <option value="Minimarket" ${state.selectedType === 'Minimarket' ? 'selected' : ''}>Minimarket</option>
               </select>
             </div>
 
-            <!-- Filter Status Kredit -->
-            <div class="md:col-span-2 relative flex items-center" style="grid-column: span 2 / span 12; position:relative;">
-              <select
-                id="crm-credit-select"
-                class="w-full bg-surface-container-low text-on-surface px-3 py-2.5 rounded-lg text-body-md font-body-md appearance-none cursor-pointer focus:outline-none focus:bg-surface-container text-xs border-0"
-              >
-                <option value="ALL" ${state.selectedCredit === 'ALL' ? 'selected' : ''}>Semua Status Kredit</option>
-                <option value="Lancar" ${state.selectedCredit === 'Lancar' ? 'selected' : ''}>Lancar (&gt;50% Sisa)</option>
-                <option value="Perhatian" ${state.selectedCredit === 'Perhatian' ? 'selected' : ''}>Menjelang Jatuh Tempo</option>
-                <option value="Overdue" ${state.selectedCredit === 'Overdue' ? 'selected' : ''}>Overdue / Limit Habis</option>
+            <div class="md:col-span-2">
+              <select id="crm-credit-select" class="form-select">
+                <option value="ALL" ${state.selectedCredit === 'ALL' ? 'selected' : ''}>Semua Kredit</option>
+                <option value="Lancar" ${state.selectedCredit === 'Lancar' ? 'selected' : ''}>Lancar</option>
+                <option value="Perhatian" ${state.selectedCredit === 'Perhatian' ? 'selected' : ''}>Perhatian</option>
+                <option value="Overdue" ${state.selectedCredit === 'Overdue' ? 'selected' : ''}>Overdue</option>
               </select>
             </div>
           </div>
 
-          <!-- Active Segment Chips / Quick Filters -->
-          <div class="flex items-center justify-between pt-2">
-            <div class="flex items-center gap-space-xs flex-wrap">
-              <span class="text-on-surface-variant font-label-sm text-label-sm mr-1 font-semibold text-xs">
-                Rute Sales Aktif:
-              </span>
-              ${[
-                { id: 'all', label: 'Semua Rute' },
-                { id: 'Budi', label: 'Solo Tengah (Budi Santoso)' },
-                { id: 'Tri', label: 'Sukoharjo-Solo Baru (Tri Wahyuni)' },
-                { id: 'Agus', label: 'Karanganyar-Palur (Agus Hermawan)' },
-                { id: 'Rian', label: 'Klaten-Boyolali (Rian Pratama)' }
-              ].map(function (r) {
-                var isSelected = state.activeRouteFilter === r.id;
+          <div class="flex items-center justify-between flex-wrap gap-2 pt-1">
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <span class="text-xs text-on-surface-variant font-semibold mr-1">Sales:</span>
+              <button
+                class="btn-route-chip btn btn-sm ${state.activeRouteFilter === 'all' ? 'btn-primary' : 'btn-outline'}"
+                data-route="all"
+                type="button"
+              >Semua</button>
+              ${routeReps.map(function (rep) {
+                var key = rep.name.split(' ')[0];
+                var isSelected = state.activeRouteFilter === key;
                 return `
                   <button
-                    class="btn-route-chip px-2.5 py-1 rounded-full text-label-sm font-label-sm text-xs transition-colors cursor-pointer border-0 ${
-                      isSelected
-                        ? 'bg-primary text-white font-semibold shadow-xs'
-                        : 'bg-surface-container-low text-on-surface hover:bg-surface-container'
-                    }"
-                    data-route="${r.id}"
+                    class="btn-route-chip btn btn-sm ${isSelected ? 'btn-primary' : 'btn-outline'}"
+                    data-route="${window.ArbaUtils.escapeHtml(key)}"
                     type="button"
                   >
-                    ${r.label}
+                    ${window.ArbaUtils.escapeHtml(rep.name)}
                   </button>
                 `;
               }).join('')}
             </div>
-            <div class="text-on-surface-variant font-code-table text-code-table hidden lg:block text-xs font-mono">
-              Menampilkan ${filteredOutlets.length} dari ${168 + (outlets.length - 6)} outlet
+            <div class="text-xs font-mono text-on-surface-variant">
+              ${filteredOutlets.length} dari ${outlets.length} outlet
             </div>
           </div>
         </div>
 
-        <!-- Main Directory Table & Drawer Container -->
-        <div class="grid grid-cols-1 xl:grid-cols-12 gap-space-lg items-start">
-          <!-- Main Interactive Table (8 cols) -->
-          <div class="xl:col-span-8 bg-surface-container-lowest rounded-xl shadow-xs border border-border-subtle/40 overflow-hidden flex flex-col">
-            <div class="px-space-md py-space-sm bg-surface-container-low flex items-center justify-between border-b border-border-subtle/30 p-3">
-              <div class="flex items-center gap-2">
-                <span class="material-symbols-outlined text-primary text-[20px]">table_rows</span>
-                <span class="font-title-sm text-title-sm text-on-surface font-bold text-sm">
-                  Daftar Mitra B2B Wilayah Solo Raya
-                </span>
-              </div>
-              <span class="font-label-sm text-label-sm text-on-surface-variant text-xs">
-                Klik baris outlet untuk detail performa &amp; riwayat
-              </span>
-            </div>
-
-            <div class="overflow-x-auto">
-              <table class="w-full text-left text-xs">
+        <!-- Main Directory Table & Detail Pane -->
+        <div class="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
+          <div class="xl:col-span-8 section-card p-0 overflow-hidden flex flex-col">
+            <div class="table-container border-0 rounded-none">
+              <table class="data-table">
                 <thead>
-                  <tr class="bg-surface-container-low/70 text-on-surface-variant font-label-sm text-label-sm uppercase tracking-wider">
-                    <th class="py-3 px-space-md">Kode &amp; Nama Outlet</th>
-                    <th class="py-3 px-3">Tipe</th>
-                    <th class="py-3 px-3">Penanggung Jawab</th>
-                    <th class="py-3 px-3">Kota</th>
-                    <th class="py-3 px-3">Termin</th>
-                    <th class="py-3 px-3">Plafon / Sisa Limit</th>
-                    <th class="py-3 px-3">Sales Lapangan</th>
-                    <th class="py-3 px-3">Order Terakhir</th>
-                    <th class="py-3 px-space-md text-right">Aksi</th>
+                  <tr>
+                    <th>Outlet</th>
+                    <th>Tipe</th>
+                    <th>PIC</th>
+                    <th>Kota</th>
+                    <th>Termin</th>
+                    <th>Plafon &amp; Sisa</th>
+                    <th>Sales</th>
+                    <th class="text-right">Aksi</th>
                   </tr>
                 </thead>
-                <tbody class="text-on-surface text-body-md font-body-md divide-y divide-border-subtle/30">
-                  ${paginatedOutlets.map(function (outlet) {
+                <tbody>
+                  ${paginatedOutlets.length === 0 ? `
+                    <tr><td colspan="8" class="text-center text-on-surface-variant py-6">Tidak ada outlet yang cocok.</td></tr>
+                  ` : paginatedOutlets.map(function (outlet) {
                     var isSelected = outlet.id === selectedOutletId;
-                    var pRemaining = Math.round((outlet.creditRemaining / outlet.creditLimit) * 100);
+                    var pRemaining = outlet.creditLimit ? Math.round((outlet.creditRemaining / outlet.creditLimit) * 100) : 0;
 
                     return `
-                      <tr
-                        class="crm-outlet-row cursor-pointer transition-colors ${
-                          isSelected ? 'bg-surface-container' : 'hover:bg-surface-container-low/70'
-                        }"
-                        data-outlet-id="${outlet.id}"
-                      >
-                        <td class="py-3.5 px-space-md">
-                          <div class="flex flex-col">
-                            <span class="font-label-sm text-label-sm text-primary font-semibold font-mono text-[11px]">
-                              ${outlet.code}
-                            </span>
-                            <span class="font-label-lg text-label-lg font-semibold text-on-surface leading-snug">
-                              ${outlet.name}
-                            </span>
-                            <span class="font-body-sm text-body-sm text-on-surface-variant truncate max-w-xs text-[11px]">
-                              ${outlet.address}
-                            </span>
-                          </div>
+                      <tr class="crm-outlet-row cursor-pointer ${isSelected ? 'bg-surface-container' : ''}" data-outlet-id="${outlet.id}">
+                        <td>
+                          <div class="font-mono text-[11px] text-primary font-semibold">${window.ArbaUtils.escapeHtml(outlet.code)}</div>
+                          <div class="font-semibold text-on-surface">${window.ArbaUtils.escapeHtml(outlet.name)}</div>
+                          <div class="text-[11px] text-on-surface-variant truncate max-w-xs">${window.ArbaUtils.escapeHtml(outlet.address)}</div>
                         </td>
-
-                        <td class="py-3.5 px-3 whitespace-nowrap">
-                          <span
-                            class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-label-sm font-label-sm font-semibold text-[11px] ${
-                              outlet.type === 'Minimarket'
-                                ? 'bg-surface-container text-primary'
-                                : 'bg-secondary-fixed text-on-secondary-fixed'
-                            }"
-                          >
-                            <span class="material-symbols-outlined text-[14px]">
-                              ${outlet.type === 'Minimarket' ? 'store' : 'local_pharmacy'}
-                            </span>
+                        <td>
+                          <span class="badge ${outlet.type === 'Minimarket' ? 'badge-neutral' : 'badge-primary'}">
                             ${outlet.type === 'Minimarket' ? 'Minimarket' : 'Apotek'}
                           </span>
                         </td>
-
-                        <td class="py-3.5 px-3">
-                          <div class="flex flex-col">
-                            <span class="font-label-md text-label-md text-on-surface font-medium">
-                              ${outlet.picName}
-                            </span>
-                            <a
-                              href="https://wa.me/${outlet.picPhone}"
-                              target="_blank"
-                              rel="noreferrer"
-                              class="font-label-sm text-label-sm text-primary hover:underline flex items-center gap-1 mt-0.5 text-[11px]"
-                              onclick="event.stopPropagation()"
-                            >
-                              <span class="material-symbols-outlined text-[13px]">chat</span>
-                              ${outlet.picPhone.replace(/^62/, '0')}
-                            </a>
+                        <td>
+                          <div class="font-medium text-on-surface">${window.ArbaUtils.escapeHtml(outlet.picName)}</div>
+                          <a
+                            href="https://wa.me/${outlet.picPhone}"
+                            target="_blank"
+                            rel="noreferrer"
+                            class="text-primary hover:underline flex items-center gap-1 mt-0.5 text-[11px]"
+                            onclick="event.stopPropagation()"
+                          >
+                            ${window.ArbaUtils.escapeHtml(outlet.picPhone.replace(/^62/, '0'))}
+                          </a>
+                        </td>
+                        <td>${window.ArbaUtils.escapeHtml(outlet.cityName)}</td>
+                        <td><span class="badge badge-neutral">${window.ArbaUtils.escapeHtml(outlet.terms)}</span></td>
+                        <td>
+                          <div class="font-mono font-semibold text-on-surface">${window.ArbaUtils.formatRupiah(outlet.creditLimit)}</div>
+                          <div class="text-[11px] ${outlet.creditStatus === 'Overdue' ? 'text-rose-600 font-bold' : outlet.creditStatus === 'Perhatian' ? 'text-amber-700 font-semibold' : 'text-emerald-700'}">
+                            Sisa ${pRemaining}%
                           </div>
                         </td>
-
-                        <td class="py-3.5 px-3 whitespace-nowrap">
-                          <span class="font-label-md text-label-md text-on-surface">${outlet.cityName}</span>
+                        <td>
+                          <div class="font-semibold text-on-surface">${window.ArbaUtils.escapeHtml(outlet.salesRep)}</div>
+                          <div class="text-[11px] text-on-surface-variant">${window.ArbaUtils.escapeHtml(outlet.salesArea)}</div>
                         </td>
-
-                        <td class="py-3.5 px-3 whitespace-nowrap">
-                          <span class="px-2 py-0.5 rounded bg-surface-container text-on-surface text-label-sm font-label-sm font-semibold">
-                            ${outlet.terms}
-                          </span>
-                        </td>
-
-                        <td class="py-3.5 px-3 whitespace-nowrap">
-                          <div class="flex flex-col">
-                            <span class="font-code-table text-code-table font-semibold text-on-surface font-mono">
-                              ${window.ArbaUtils.formatRupiah(outlet.creditLimit)}
-                            </span>
-                            <span
-                              class="font-label-sm text-label-sm font-medium text-[11px] ${
-                                outlet.creditStatus === 'Overdue'
-                                  ? 'text-rose-600 font-bold'
-                                  : outlet.creditStatus === 'Perhatian'
-                                  ? 'text-amber-700 font-semibold'
-                                  : 'text-emerald-700'
-                              }"
-                            >
-                              Sisa: ${window.ArbaUtils.formatRupiah(outlet.creditRemaining)} (${pRemaining}%)
-                            </span>
-                            <div class="w-24 h-1.5 bg-surface-container rounded-full overflow-hidden mt-1" style="width:96px; height:6px;">
-                              <div
-                                class="h-full ${
-                                  outlet.creditStatus === 'Overdue'
-                                    ? 'bg-rose-500'
-                                    : outlet.creditStatus === 'Perhatian'
-                                    ? 'bg-amber-500'
-                                    : 'bg-emerald-600'
-                                }"
-                                style="width: ${pRemaining}%;"
-                              ></div>
-                            </div>
-                          </div>
-                        </td>
-
-                        <td class="py-3.5 px-3">
-                          <div class="flex flex-col">
-                            <span class="font-label-md text-label-md text-on-surface font-semibold">
-                              ${outlet.salesRep}
-                            </span>
-                            <span class="font-label-sm text-label-sm text-on-surface-variant text-[11px]">
-                              ${outlet.salesArea}
-                            </span>
-                          </div>
-                        </td>
-
-                        <td class="py-3.5 px-3 whitespace-nowrap">
-                          <div class="flex flex-col">
-                            <span class="font-label-md text-label-md text-on-surface">
-                              ${outlet.lastOrderDate}
-                            </span>
-                            <span
-                              class="font-label-sm text-label-sm text-[11px] ${
-                                outlet.creditStatus === 'Overdue'
-                                  ? 'text-rose-600 font-bold'
-                                  : outlet.creditStatus === 'Perhatian'
-                                  ? 'text-amber-700 font-semibold'
-                                  : 'text-on-surface-variant'
-                              }"
-                            >
-                              ${outlet.orderFrequency}
-                            </span>
-                          </div>
-                        </td>
-
-                        <td class="py-3.5 px-space-md text-right whitespace-nowrap">
-                          <div class="flex items-center justify-end gap-1.5">
-                            <button
-                              class="btn-outlet-history p-1.5 rounded-lg text-primary hover:bg-surface-container transition-colors cursor-pointer border-0 bg-transparent"
-                              title="Profil &amp; Riwayat Transaksi"
-                              data-outlet-id="${outlet.id}"
-                              type="button"
-                              onclick="event.stopPropagation()"
-                            >
+                        <td class="text-right whitespace-nowrap">
+                          <div class="flex items-center justify-end gap-1">
+                            <button class="btn-outlet-history icon-btn" title="Riwayat Faktur" data-outlet-id="${outlet.id}" type="button" onclick="event.stopPropagation()">
                               <span class="material-symbols-outlined text-[18px]">receipt_long</span>
                             </button>
-                            <button
-                              class="btn-outlet-visit p-1.5 rounded-lg text-primary hover:bg-surface-container transition-colors cursor-pointer border-0 bg-transparent"
-                              title="Jadwalkan Kunjungan"
-                              data-outlet-id="${outlet.id}"
-                              type="button"
-                              onclick="event.stopPropagation()"
-                            >
+                            <button class="btn-outlet-visit icon-btn" title="Jadwal Kunjungan" data-outlet-id="${outlet.id}" type="button" onclick="event.stopPropagation()">
                               <span class="material-symbols-outlined text-[18px]">event_available</span>
                             </button>
                           </div>
@@ -553,308 +315,107 @@
               </table>
             </div>
 
-            <!-- Pagination / Table Footer -->
-            <div class="px-space-md py-3 bg-surface-container-low flex flex-col sm:flex-row items-center justify-between gap-2 border-t border-border-subtle/30 text-xs p-3">
-              <span class="font-label-sm text-label-sm text-on-surface-variant">
-                Menampilkan ${paginatedOutlets.length} dari ${filteredOutlets.length} outlet terfilter (Total Jaringan: 1.024+ Mitra • Hal ${state.crmPage}/${totalCrmPages})
-              </span>
+            <div class="px-4 py-3 bg-surface-container-low flex flex-col sm:flex-row items-center justify-between gap-2 border-t border-border-subtle text-xs text-on-surface-variant">
+              <span>Menampilkan ${paginatedOutlets.length} dari ${filteredOutlets.length} outlet (Hal ${state.crmPage}/${totalCrmPages})</span>
               <div class="flex items-center gap-1">
-                <button
-                  id="btn-crm-prev"
-                  class="w-8 h-8 rounded flex items-center justify-center text-on-surface-variant bg-surface-container-lowest hover:bg-surface-container transition-colors cursor-pointer border-0 ${state.crmPage <= 1 ? 'opacity-40' : ''}"
-                  type="button"
-                >
+                <button id="btn-crm-prev" class="btn btn-sm btn-outline ${state.crmPage <= 1 ? 'opacity-40' : ''}" type="button">
                   <span class="material-symbols-outlined text-[16px]">chevron_left</span>
                 </button>
                 ${Array.from({ length: totalCrmPages }, function (_, idx) {
                   var pNum = idx + 1;
                   var active = pNum === state.crmPage;
-                  return `
-                    <button
-                      type="button"
-                      class="btn-crm-page w-8 h-8 rounded flex items-center justify-center font-label-sm text-label-sm font-semibold cursor-pointer border-0 ${
-                        active ? 'bg-primary text-white' : 'text-on-surface-variant bg-surface-container-lowest hover:bg-surface-container'
-                      }"
-                      data-page="${pNum}"
-                    >
-                      ${pNum}
-                    </button>
-                  `;
+                  return `<button type="button" class="btn-crm-page btn btn-sm ${active ? 'btn-primary' : 'btn-outline'}" data-page="${pNum}">${pNum}</button>`;
                 }).join('')}
-                <button
-                  id="btn-crm-next"
-                  class="w-8 h-8 rounded flex items-center justify-center text-on-surface-variant bg-surface-container-lowest hover:bg-surface-container transition-colors cursor-pointer border-0 ${state.crmPage >= totalCrmPages ? 'opacity-40' : ''}"
-                  type="button"
-                >
+                <button id="btn-crm-next" class="btn btn-sm btn-outline ${state.crmPage >= totalCrmPages ? 'opacity-40' : ''}" type="button">
                   <span class="material-symbols-outlined text-[16px]">chevron_right</span>
                 </button>
               </div>
             </div>
           </div>
 
-          <!-- Side Drawer / Detail Pane: Ringkasan Performa Outlet Terpilih (4 cols) -->
-          <div class="xl:col-span-4 flex flex-col gap-space-md">
+          <!-- Outlet Detail Drawer -->
+          <div class="xl:col-span-4 flex flex-col gap-4">
             ${selectedOutlet ? `
-              <div class="bg-surface-container-lowest rounded-xl shadow-xs border border-border-subtle/40 p-space-md flex flex-col gap-space-md p-4">
-                <!-- Drawer Header with Outlet Badge -->
-                <div class="flex items-start justify-between">
-                  <div class="flex flex-col">
-                    <div class="flex items-center gap-2">
-                      <span class="px-2 py-0.5 rounded bg-primary text-white font-code-table text-code-table font-semibold text-xs font-mono">
-                        ${selectedOutlet.code}
-                      </span>
-                      <span
-                        class="px-2 py-0.5 rounded font-label-sm text-label-sm font-semibold text-xs ${
-                          selectedOutlet.creditStatus === 'Overdue'
-                            ? 'bg-status-danger-bg text-status-danger-text'
-                            : selectedOutlet.creditStatus === 'Perhatian'
-                            ? 'bg-status-warning-bg text-status-warning-text'
-                            : 'bg-status-success-bg text-status-success-text'
-                        }"
-                      >
-                        ${selectedOutlet.creditStatus === 'Overdue' ? 'Overdue' : 'Akun Aktif'}
-                      </span>
-                    </div>
-                    <h2 class="font-headline-md text-headline-md text-on-surface mt-2 font-bold leading-snug text-lg">
-                      ${selectedOutlet.name}
-                    </h2>
-                    <p class="font-body-sm text-body-sm text-on-surface-variant text-xs">
-                      ${selectedOutlet.address}, ${selectedOutlet.cityName}
-                    </p>
-                  </div>
-                </div>
-
-                <!-- Omset Performa Snapshot & Chart Widget -->
-                <div class="bg-surface-container-low p-space-md rounded-lg flex flex-col gap-space-sm border border-border-subtle/30 p-3">
-                  <div class="flex items-center justify-between">
-                    <span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider font-semibold text-xs">
-                      Performa Omset YTD 2026
-                    </span>
-                    <span class="font-code-table text-code-table font-semibold text-primary font-mono text-xs">
-                      ${window.ArbaUtils.formatRupiah(selectedOutlet.ytdTotal)}
+              <div class="section-card flex flex-col gap-4">
+                <div>
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="badge badge-primary font-mono">${window.ArbaUtils.escapeHtml(selectedOutlet.code)}</span>
+                    <span class="badge ${selectedOutlet.creditStatus === 'Overdue' ? 'badge-danger' : selectedOutlet.creditStatus === 'Perhatian' ? 'badge-warning' : 'badge-success'}">
+                      ${window.ArbaUtils.escapeHtml(selectedOutlet.creditStatus)}
                     </span>
                   </div>
-                  <!-- Mini SVG Trend Sparkline -->
-                  <div class="h-20 w-full flex items-end pt-2" style="height:64px;">
-                    <svg class="w-full h-full text-primary" fill="none" preserveAspectRatio="none" viewBox="0 0 240 60">
-                      <line stroke="var(--color-border-subtle)" stroke-dasharray="2 2" stroke-opacity="0.6" x1="0" x2="240" y1="15" y2="15"></line>
-                      <line stroke="var(--color-border-subtle)" stroke-dasharray="2 2" stroke-opacity="0.6" x1="0" x2="240" y1="35" y2="35"></line>
-                      <line stroke="var(--color-border-subtle)" stroke-opacity="0.4" x1="0" x2="240" y1="55" y2="55"></line>
-                      <path
-                        d="M0,45 C40,48 60,32 90,26 C120,20 150,28 180,12 C210,-2 230,8 240,4 L240,60 L0,60 Z"
-                        fill="currentColor"
-                        fill-opacity="0.15"
-                      ></path>
-                      <path
-                        d="M0,45 C40,48 60,32 90,26 C120,20 150,28 180,12 C210,-2 230,8 240,4"
-                        stroke="currentColor"
-                        stroke-linecap="round"
-                        stroke-width="2.5"
-                      ></path>
-                    </svg>
-                  </div>
-                  <div class="flex justify-between font-label-sm text-label-sm text-on-surface-variant text-[10px]">
-                    <span>Jan: 16.2 Jt</span>
-                    <span>Feb: 19.8 Jt</span>
-                    <span>Mar: 22.5 Jt</span>
-                    <span class="font-semibold text-primary">Apr: 26.0 Jt (▲15%)</span>
-                  </div>
+                  <h2 class="text-lg font-bold text-on-surface mt-2">${window.ArbaUtils.escapeHtml(selectedOutlet.name)}</h2>
+                  <p class="text-xs text-on-surface-variant">${window.ArbaUtils.escapeHtml(selectedOutlet.address)}, ${window.ArbaUtils.escapeHtml(selectedOutlet.cityName)}</p>
                 </div>
 
-                <!-- Credit Line & Terms Visualizer + Skor Kelayakan Kredit Apotek -->
+                <div class="p-3 rounded-lg bg-surface-container-low border border-border-subtle/50 flex items-center justify-between text-xs">
+                  <span class="text-on-surface-variant font-semibold">Omset YTD</span>
+                  <span class="font-mono font-bold text-primary text-sm">${window.ArbaUtils.formatRupiah(selectedOutlet.ytdTotal)}</span>
+                </div>
+
                 ${(function () {
                   var aiSc = window.ArbaStore.getOutletCreditScoring ? window.ArbaStore.getOutletCreditScoring(selectedOutlet.id) : null;
                   if (!aiSc) return '';
                   return `
-                    <div class="p-3 rounded-xl border text-xs mb-1" style="background:${aiSc.badgeBg}; border-color:${aiSc.badgeColor}40;">
+                    <div class="p-3 rounded-lg border text-xs" style="background:${aiSc.badgeBg}; border-color:${aiSc.badgeColor}40;">
                       <div class="flex items-center justify-between mb-1">
-                        <span class="font-bold flex items-center gap-1" style="color:${aiSc.badgeColor};">
-                          <span class="material-symbols-outlined text-[15px]">auto_awesome</span>
-                          Skor Kelayakan Kredit: <b>${aiSc.score}/100</b>
-                        </span>
-                        <span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-white/80" style="color:${aiSc.badgeColor};">${aiSc.tier}</span>
+                        <span class="font-bold" style="color:${aiSc.badgeColor};">Skor Kredit: ${aiSc.score}/100</span>
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/80" style="color:${aiSc.badgeColor};">${aiSc.tier}</span>
                       </div>
-                      <div class="text-[11px] text-slate-700 leading-snug ${isSalesRole ? '' : 'mb-2'}">${aiSc.recommendation}</div>
+                      <div class="text-[11px] text-slate-700 ${isSalesRole ? '' : 'mb-2'}">${aiSc.recommendation}</div>
                       ${!isSalesRole ? `
-                        <button
-                          id="btn-drawer-apply-ai-credit"
-                          type="button"
-                          class="w-full py-1.5 px-3 rounded-lg text-[11px] font-bold text-white cursor-pointer border-0 flex items-center justify-center gap-1"
-                          style="background:${aiSc.badgeColor};"
-                        >
-                          <span class="material-symbols-outlined text-[14px]">bolt</span>
-                          <span>Sesuaikan Plafon ke Rekomendasi (${window.ArbaUtils.formatRupiah(aiSc.suggestedLimit)})</span>
+                        <button id="btn-drawer-apply-ai-credit" type="button" class="btn btn-sm w-full text-white border-0" style="background:${aiSc.badgeColor};">
+                          Terapkan Plafon (${window.ArbaUtils.formatRupiah(aiSc.suggestedLimit)})
                         </button>
                       ` : ''}
                     </div>
                   `;
                 })()}
+
                 <div class="space-y-2 text-xs">
-                  <div class="flex justify-between items-center text-body-sm font-body-sm">
-                    <span class="text-on-surface-variant">Plafon Kredit Disetujui:</span>
-                    <span class="font-semibold text-on-surface font-code-table font-mono">
-                      ${window.ArbaUtils.formatRupiah(selectedOutlet.creditLimit)}
-                    </span>
+                  <div class="flex justify-between">
+                    <span class="text-on-surface-variant">Plafon Kredit</span>
+                    <span class="font-mono font-semibold text-on-surface">${window.ArbaUtils.formatRupiah(selectedOutlet.creditLimit)}</span>
                   </div>
-                  <div class="flex justify-between items-center text-body-sm font-body-sm">
-                    <span class="text-on-surface-variant">Pemakaian Berjalan:</span>
-                    <span class="font-semibold text-amber-700 font-code-table font-mono">
-                      ${window.ArbaUtils.formatRupiah(selectedOutlet.creditUsed)}
-                    </span>
+                  <div class="flex justify-between">
+                    <span class="text-on-surface-variant">Terpakai</span>
+                    <span class="font-mono font-semibold text-amber-700">${window.ArbaUtils.formatRupiah(selectedOutlet.creditUsed)}</span>
                   </div>
-                  <div class="flex justify-between items-center text-body-sm font-body-sm">
-                    <span class="text-on-surface-variant">Sisa Plafon Aman:</span>
-                    <span class="font-semibold text-emerald-700 font-code-table font-mono">
-                      ${window.ArbaUtils.formatRupiah(selectedOutlet.creditRemaining)}
-                    </span>
+                  <div class="flex justify-between">
+                    <span class="text-on-surface-variant">Sisa Plafon</span>
+                    <span class="font-mono font-semibold text-emerald-700">${window.ArbaUtils.formatRupiah(selectedOutlet.creditRemaining)}</span>
                   </div>
-                  <!-- Limit Progress Bar -->
-                  <div class="w-full h-2 bg-surface-container rounded-full overflow-hidden" style="height:8px;">
-                    <div
-                      class="h-full bg-primary"
-                      style="width: ${Math.round((selectedOutlet.creditUsed / selectedOutlet.creditLimit) * 100)}%;"
-                    ></div>
+                  <div class="progress-bar-bg">
+                    <div class="progress-bar-fill" style="width: ${selectedOutlet.creditLimit ? Math.round((selectedOutlet.creditUsed / selectedOutlet.creditLimit) * 100) : 0}%;"></div>
                   </div>
                 </div>
 
-                <!-- PIC & Sales Contact Block -->
-                <div class="bg-surface-container-low p-space-sm rounded-lg flex flex-col gap-2 border border-border-subtle/30 p-2.5 text-xs">
-                  <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 rounded-full bg-primary text-white flex items-center justify-center font-bold shadow-xs" style="width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center;">
-                      <span class="material-symbols-outlined text-[20px]">person</span>
-                    </div>
-                    <div class="flex flex-col">
-                      <span class="font-label-md text-label-md text-on-surface font-semibold">
-                        ${selectedOutlet.picName}
-                      </span>
-                      <span class="font-body-sm text-body-sm text-on-surface-variant text-[11px]">
-                        ${selectedOutlet.picRole}
-                      </span>
-                    </div>
-                  </div>
-                  <div class="flex items-center justify-between pt-1 border-t border-border-subtle/30 text-[11px]">
-                    <span class="font-label-sm text-label-sm text-on-surface-variant">Sales Dedikasi:</span>
-                    <span class="font-label-sm text-label-sm text-on-surface font-semibold">
-                      ${selectedOutlet.salesRep} (${selectedOutlet.salesArea})
-                    </span>
-                  </div>
+                <div class="p-3 rounded-lg bg-surface-container-low border border-border-subtle/50 text-xs space-y-1">
+                  <div class="font-semibold text-on-surface">${window.ArbaUtils.escapeHtml(selectedOutlet.picName)}</div>
+                  <div class="text-on-surface-variant">${window.ArbaUtils.escapeHtml(selectedOutlet.picRole)} · Sales: ${window.ArbaUtils.escapeHtml(selectedOutlet.salesRep)}</div>
+                  ${selectedOutlet.lastOrderDate ? `<div class="text-on-surface-variant">Order terakhir: ${window.ArbaUtils.escapeHtml(selectedOutlet.lastOrderDate)}</div>` : ''}
                 </div>
 
-                <!-- Rincian Stok Titipan (Konsinyasi) di Apotek Ini: Barang Laku vs Lama Tidak Laku & Alarm Pink Expired -->
-                <div class="flex flex-col gap-2">
-                  <div class="flex items-center justify-between">
-                    <span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider font-semibold text-[11px]">
-                      Stok Titipan (Konsinyasi) di Apotek Ini
-                    </span>
-                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary/10 text-primary">
-                      ${selectedOutlet.terms}
-                    </span>
-                  </div>
-                  <div class="space-y-1.5">
-                    ${(selectedOutlet.consignmentItems || []).map(function (ci) {
-                      var isSlow = ci.velocity === 'LAMA_TIDAK_LAKU';
-                      var isPink = ci.nearExpiry;
-                      return `
-                        <div class="p-2.5 rounded-lg border text-xs flex flex-col gap-1" style="background:${isPink ? '#fdf2f8' : 'var(--color-surface-container-low)'}; border-color:${isPink ? '#f472b6' : 'var(--color-border-subtle)'};">
-                          <div class="flex items-center justify-between gap-1">
-                            <span class="font-bold text-on-surface truncate">${ci.name}</span>
-                            <div class="flex items-center gap-1 shrink-0">
-                              ${isPink ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold" style="background:#db2777; color:#fff;">🩷 Hampir ED</span>` : ''}
-                              <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${isSlow ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-800'}">
-                                ${isSlow ? 'Lama Tak Laku' : 'Laris'}
-                              </span>
-                            </div>
-                          </div>
-                          <div class="flex items-center justify-between text-[11px] text-on-surface-variant">
-                            <span>Titip: <b>${ci.consignedQty}</b> · Laku: <b class="text-emerald-700">${ci.soldQty}</b> · Sisa di Apotek: <b class="text-on-surface">${ci.remainingQty}</b></span>
-                            <span>ED: <b style="${isPink ? 'color:#be185d;' : ''}">${ci.expiry}</b></span>
-                          </div>
-                        </div>
-                      `;
-                    }).join('')}
-                  </div>
-                </div>
-
-                <!-- Catatan Kunjungan Terakhir (Field Log) -->
-                <div class="flex flex-col gap-2">
-                  <div class="flex items-center justify-between">
-                    <span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider font-semibold text-[11px]">
-                      Log Kunjungan Sales Terakhir
-                    </span>
-                    <span class="font-label-sm text-label-sm text-primary font-medium text-xs">
-                      ${selectedOutlet.lastVisitDate}
-                    </span>
-                  </div>
-                  <div class="bg-surface-container-low/60 p-3 rounded-lg text-body-sm font-body-sm text-on-surface leading-relaxed border border-border-subtle/30 text-xs">
-                    <p class="m-0">${selectedOutlet.visitNotes}</p>
-                  </div>
-                </div>
-
-                <!-- Fast Actions inside Drawer -->
-                <div class="grid grid-cols-2 gap-2 pt-1">
-                  <button
-                    id="btn-drawer-whatsapp"
-                    class="inline-flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-lg bg-surface-container-low text-on-surface hover:bg-surface-container text-xs font-semibold transition-colors cursor-pointer shadow-xs active:scale-95 border border-border-subtle/40"
-                    type="button"
-                  >
-                    <span class="material-symbols-outlined text-[16px] text-emerald-600">chat</span>
-                    <span>Chat WhatsApp PIC</span>
+                <div class="grid grid-cols-2 gap-2">
+                  <button id="btn-drawer-whatsapp" class="btn btn-outline" type="button">
+                    <span class="material-symbols-outlined text-[16px]">chat</span>
+                    <span>WhatsApp</span>
                   </button>
-                  <button
-                    id="btn-drawer-visit"
-                    class="inline-flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-lg bg-primary text-white hover:bg-primary-container text-xs font-semibold transition-colors shadow-xs cursor-pointer active:scale-95 border-0"
-                    type="button"
-                  >
+                  <button id="btn-drawer-visit" class="btn btn-primary" type="button">
                     <span class="material-symbols-outlined text-[16px]">add_task</span>
-                    <span>Jadwal Kunjungan</span>
+                    <span>Kunjungan</span>
                   </button>
-                  <button
-                    id="btn-drawer-history"
-                    class="inline-flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-on-surface text-xs font-semibold transition-colors cursor-pointer shadow-xs active:scale-95 border-0"
-                    type="button"
-                  >
-                    <span class="material-symbols-outlined text-[16px] text-primary">receipt_long</span>
-                    <span>Riwayat Faktur</span>
+                  <button id="btn-drawer-history" class="btn btn-outline" type="button">
+                    <span class="material-symbols-outlined text-[16px]">receipt_long</span>
+                    <span>Riwayat</span>
                   </button>
-                  <button
-                    id="btn-drawer-pwa"
-                    class="inline-flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-lg bg-secondary text-white hover:bg-secondary-container text-xs font-semibold transition-colors shadow-xs cursor-pointer active:scale-95 border-0"
-                    type="button"
-                  >
+                  <button id="btn-drawer-pwa" class="btn btn-secondary" type="button">
                     <span class="material-symbols-outlined text-[16px]">point_of_sale</span>
-                    <span>Buat Order PWA</span>
+                    <span>Buat Order</span>
                   </button>
                 </div>
               </div>
             ` : ''}
-
-            <!-- Quick Delivery Coverage Indicator (Solo Raya) -->
-            <div class="bg-surface-container-lowest rounded-xl p-space-md shadow-xs border border-border-subtle/40 flex flex-col gap-space-sm p-4 text-xs">
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-2">
-                  <span class="material-symbols-outlined text-secondary text-[20px]">local_shipping</span>
-                  <span class="font-title-sm text-title-sm text-on-surface font-bold text-sm">
-                    Armada Pengiriman Hari Ini
-                  </span>
-                </div>
-                <span class="font-label-sm text-label-sm text-status-success-text font-semibold bg-status-success-bg px-2 py-0.5 rounded text-[11px]">
-                  Rute Terjadwal
-                </span>
-              </div>
-              <p class="font-body-sm text-body-sm text-on-surface-variant">
-                Pemesanan outlet sebelum pukul 13:00 WIB dikirim pada slot sore (15:00 - 18:00 WIB) armada van gudang Solo Baru.
-              </p>
-              <div class="grid grid-cols-2 gap-2 pt-1 font-label-sm text-label-sm">
-                <div class="bg-surface-container-low p-2 rounded flex flex-col">
-                  <span class="text-on-surface-variant text-[11px]">Slot Pagi (08:00 - 12:00)</span>
-                  <span class="font-semibold text-on-surface mt-0.5">34 Outlet Solo &amp; Sukoharjo</span>
-                </div>
-                <div class="bg-surface-container-low p-2 rounded flex flex-col">
-                  <span class="text-on-surface-variant text-[11px]">Slot Sore (13:00 - 17:00)</span>
-                  <span class="font-semibold text-on-surface mt-0.5">28 Outlet Karanganyar &amp; Klaten</span>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -865,45 +426,29 @@
   }
 
   function bindEvents(container, selectedOutlet) {
-    // Import / Migrasi CRM CSV
     var btnImportCsv = container.querySelector('#btn-import-crm-csv');
-    if (btnImportCsv) {
-      btnImportCsv.addEventListener('click', function () {
-        openImportOutletsModal();
-      });
-    }
+    if (btnImportCsv) btnImportCsv.addEventListener('click', openImportOutletsModal);
 
-    // Export CRM CSV
     var btnCsv = container.querySelector('#btn-export-crm-csv');
     if (btnCsv) {
       btnCsv.addEventListener('click', function () {
         var outlets = window.ArbaStore.getState().outlets;
         window.ArbaUtils.exportCrmToCsv(outlets);
-        window.ArbaApp.showToast(`Berhasil mengunduh data ${outlets.length} mitra B2B Solo Raya (.CSV)`, 'file_download');
+        window.ArbaApp.showToast('Data outlet (.CSV) berhasil diunduh', 'file_download');
       });
     }
 
-    // New Outlet Registration
     var btnNew = container.querySelector('#btn-new-outlet');
-    if (btnNew) {
-      btnNew.addEventListener('click', function () {
-        openNewOutletModal();
-      });
-    }
+    if (btnNew) btnNew.addEventListener('click', openNewOutletModal);
 
-    // Advance Buttons: Consignment Rebalancer, AI Credit Scoring, & TSP Map
     var btnRebalancer = container.querySelector('#btn-crm-rebalancer');
     if (btnRebalancer && window.ArbaAdvanced) {
-      btnRebalancer.addEventListener('click', function () {
-        window.ArbaAdvanced.openConsignmentRebalancerModal();
-      });
+      btnRebalancer.addEventListener('click', window.ArbaAdvanced.openConsignmentRebalancerModal);
     }
 
     var btnCreditScore = container.querySelector('#btn-crm-credit-score');
     if (btnCreditScore && window.ArbaAdvanced) {
-      btnCreditScore.addEventListener('click', function () {
-        window.ArbaAdvanced.openCreditScoringModal();
-      });
+      btnCreditScore.addEventListener('click', window.ArbaAdvanced.openCreditScoringModal);
     }
 
     var btnTspMap = container.querySelector('#btn-crm-tsp-map');
@@ -920,11 +465,11 @@
       });
     }
 
-    // Search input
     var searchInput = container.querySelector('#crm-search-input');
     if (searchInput) {
       searchInput.addEventListener('input', function (e) {
         state.searchQuery = e.target.value;
+        state.crmPage = 1;
         renderB2bCrm(container);
         var inputNow = container.querySelector('#crm-search-input');
         if (inputNow) {
@@ -934,109 +479,84 @@
       });
     }
 
-    // Region select
     var regionSelect = container.querySelector('#crm-region-select');
     if (regionSelect) {
       regionSelect.addEventListener('change', function (e) {
         state.selectedRegion = e.target.value;
+        state.crmPage = 1;
         renderB2bCrm(container);
       });
     }
 
-    // Type select
     var typeSelect = container.querySelector('#crm-type-select');
     if (typeSelect) {
       typeSelect.addEventListener('change', function (e) {
         state.selectedType = e.target.value;
+        state.crmPage = 1;
         renderB2bCrm(container);
       });
     }
 
-    // Credit select
     var creditSelect = container.querySelector('#crm-credit-select');
     if (creditSelect) {
       creditSelect.addEventListener('change', function (e) {
         state.selectedCredit = e.target.value;
+        state.crmPage = 1;
         renderB2bCrm(container);
       });
     }
 
-    // Route chips
-    var routeChips = container.querySelectorAll('.btn-route-chip');
-    routeChips.forEach(function (chip) {
+    container.querySelectorAll('.btn-route-chip').forEach(function (chip) {
       chip.addEventListener('click', function () {
         state.activeRouteFilter = chip.getAttribute('data-route');
+        state.crmPage = 1;
         renderB2bCrm(container);
       });
     });
 
-    // Row selection click
-    var rows = container.querySelectorAll('.crm-outlet-row');
-    rows.forEach(function (row) {
+    container.querySelectorAll('.crm-outlet-row').forEach(function (row) {
       row.addEventListener('click', function () {
-        var outletId = row.getAttribute('data-outlet-id');
-        window.ArbaStore.setSelectedOutletId(outletId);
+        window.ArbaStore.setSelectedOutletId(row.getAttribute('data-outlet-id'));
       });
     });
 
-    // Action buttons inside table rows
-    var historyBtns = container.querySelectorAll('.btn-outlet-history');
-    historyBtns.forEach(function (btn) {
+    container.querySelectorAll('.btn-outlet-history').forEach(function (btn) {
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
-        var outletId = btn.getAttribute('data-outlet-id');
-        var outlet = window.ArbaStore.getState().outlets.find(function (o) { return o.id === outletId; });
+        var outlet = window.ArbaStore.getState().outlets.find(function (o) { return o.id === btn.getAttribute('data-outlet-id'); });
         if (outlet) openHistoryModal(outlet);
       });
     });
 
-    var visitBtns = container.querySelectorAll('.btn-outlet-visit');
-    visitBtns.forEach(function (btn) {
+    container.querySelectorAll('.btn-outlet-visit').forEach(function (btn) {
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
-        var outletId = btn.getAttribute('data-outlet-id');
-        var outlet = window.ArbaStore.getState().outlets.find(function (o) { return o.id === outletId; });
+        var outlet = window.ArbaStore.getState().outlets.find(function (o) { return o.id === btn.getAttribute('data-outlet-id'); });
         if (outlet) openVisitModal(outlet);
       });
     });
 
-    // Drawer buttons
     if (selectedOutlet) {
       var btnWa = container.querySelector('#btn-drawer-whatsapp');
-      if (btnWa) {
-        btnWa.addEventListener('click', function () {
-          openWhatsAppModal(selectedOutlet);
-        });
-      }
+      if (btnWa) btnWa.addEventListener('click', function () { openWhatsAppModal(selectedOutlet); });
 
       var btnDrawerVisit = container.querySelector('#btn-drawer-visit');
-      if (btnDrawerVisit) {
-        btnDrawerVisit.addEventListener('click', function () {
-          openVisitModal(selectedOutlet);
-        });
-      }
+      if (btnDrawerVisit) btnDrawerVisit.addEventListener('click', function () { openVisitModal(selectedOutlet); });
 
       var btnDrawerHist = container.querySelector('#btn-drawer-history');
-      if (btnDrawerHist) {
-        btnDrawerHist.addEventListener('click', function () {
-          openHistoryModal(selectedOutlet);
-        });
-      }
+      if (btnDrawerHist) btnDrawerHist.addEventListener('click', function () { openHistoryModal(selectedOutlet); });
 
       var btnDrawerPwa = container.querySelector('#btn-drawer-pwa');
       if (btnDrawerPwa) {
         btnDrawerPwa.addEventListener('click', function () {
           window.ArbaStore.setSelectedOutletId(selectedOutlet.id);
           window.ArbaApp.navigate('field-sales-pwa-preview');
-          window.ArbaApp.showToast(`Beralih ke Field Sales PWA untuk ${selectedOutlet.name}`, 'smartphone');
         });
       }
     }
 
-    // CRM Pagination buttons
     var crmPrev = container.querySelector('#btn-crm-prev');
     var crmNext = container.querySelector('#btn-crm-next');
-    var crmPages = container.querySelectorAll('.btn-crm-page');
     if (crmPrev) {
       crmPrev.addEventListener('click', function () {
         if (state.crmPage > 1) {
@@ -1051,7 +571,7 @@
         renderB2bCrm(container);
       });
     }
-    crmPages.forEach(function (btn) {
+    container.querySelectorAll('.btn-crm-page').forEach(function (btn) {
       btn.addEventListener('click', function () {
         state.crmPage = Number(btn.getAttribute('data-page')) || 1;
         renderB2bCrm(container);
@@ -1059,67 +579,40 @@
     });
   }
 
-  // Modal 0: Migrasi / Impor Data Awal Outlet B2B (CSV)
   function openImportOutletsModal() {
     var sampleCsv = [
       'kode_outlet,nama_outlet,tipe,kota,alamat,nama_pic,telepon_pic,sales_rep,termin,limit_kredit,omset_ytd',
       'AP-SLO-190,Apotek Muhamadiyah Pabelan UMS,Apotek Mandiri,Solo,"Jl. Ahmad Yani No. 157, Pabelan",apt. Siti Aminah S.Farm,6281329001122,Budi Santoso,Net 30 Hari,12000000,18500000',
-      'MM-SKH-191,Swalayan Assalaam Hypermarket,Minimarket,Sukoharjo,"Jl. Ahmad Yani KM 6, Kartasura",H. Agus Santoso,6281228003344,Anita Rahmawati,Net 14 Hari,25000000,42000000',
-      'AP-KLT-192,Apotek Sehat Delanggu,Apotek Mandiri,Klaten,"Jl. Raya Solo-Jogja KM 22, Delanggu",apt. Wahyu Nugroho S.Farm,6285725009988,Rian Pratama,Net 30 Hari,10000000,14200000'
+      'MM-SKH-191,Swalayan Assalaam Hypermarket,Minimarket,Sukoharjo,"Jl. Ahmad Yani KM 6, Kartasura",H. Agus Santoso,6281228003344,Tri Wahyuni,Net 14 Hari,25000000,42000000'
     ].join('\n');
 
     var modalHtml = `
       <div class="modal-dialog max-w-2xl">
         <div class="modal-header">
-          <div class="flex items-center gap-2.5">
-            <div class="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
-              <span class="material-symbols-outlined text-[20px]">upload_file</span>
-            </div>
-            <div>
-              <h3 class="font-bold text-sm text-on-surface">Skema Migrasi &amp; Impor Data Awal Pelanggan B2B (.CSV)</h3>
-              <p class="text-[11px] text-on-surface-variant">Unggah berkas CSV dari Excel lama CV Arba'in atau gunakan template standar</p>
-            </div>
-          </div>
-          <button class="icon-btn" onclick="window.ArbaApp.closeModal()">
+          <h3 class="modal-title">Impor Outlet (.CSV)</h3>
+          <button class="icon-btn" onclick="window.ArbaApp.closeModal()" type="button">
             <span class="material-symbols-outlined text-[18px]">close</span>
           </button>
         </div>
 
         <div class="modal-body text-xs space-y-3">
           <div class="flex flex-wrap items-center justify-between gap-2 bg-surface-container-low p-3 rounded-lg border border-border-subtle/50">
-            <div class="text-on-surface-variant">
-              Format Kolom: <code class="font-mono text-primary font-semibold">kode_outlet, nama_outlet, tipe, kota, alamat, nama_pic, telepon_pic, sales_rep, termin, limit_kredit</code>
-            </div>
-            <div class="flex items-center gap-2">
-              <button type="button" id="btn-download-outlet-template" class="px-3 py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-semibold cursor-pointer border border-border-subtle/50 flex items-center gap-1">
-                <span class="material-symbols-outlined text-[15px]">download</span>
-                <span>Unduh Template CSV</span>
-              </button>
-              <button type="button" id="btn-load-outlet-sample" class="px-3 py-1.5 rounded-lg bg-primary/10 text-primary font-semibold cursor-pointer border-0">
-                Isi Contoh Data Mitra
-              </button>
-            </div>
+            <code class="font-mono text-primary text-[11px]">kode_outlet, nama_outlet, tipe, kota, alamat, nama_pic, telepon_pic, sales_rep, termin, limit_kredit</code>
+            <button type="button" id="btn-download-outlet-template" class="btn btn-sm btn-outline">Unduh Template</button>
           </div>
+          <div class="form-group">
+            <label class="form-label">Berkas CSV</label>
+            <input type="file" id="input-outlet-csv-file" accept=".csv,text/csv" class="form-input" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Data CSV</label>
+            <textarea id="textarea-outlet-csv" rows="6" class="form-textarea font-mono text-[11px]">${sampleCsv}</textarea>
+          </div>
+        </div>
 
-          <div class="space-y-1">
-            <label class="font-semibold text-on-surface block">Pilih Berkas CSV dari Komputer (.csv):</label>
-            <input type="file" id="input-outlet-csv-file" accept=".csv,text/csv" class="w-full p-2 rounded-lg border border-border-subtle bg-surface text-xs" />
-          </div>
-
-          <div class="space-y-1">
-            <label class="font-semibold text-on-surface block">Atau Tempel / Edit Baris CSV Secara Langsung:</label>
-            <textarea id="textarea-outlet-csv" rows="6" class="w-full p-2.5 rounded-lg border border-border-subtle bg-surface font-mono text-[11px] text-on-surface">${sampleCsv}</textarea>
-          </div>
-
-          <div class="flex items-center justify-end gap-2 pt-2">
-            <button type="button" class="px-3.5 py-2 rounded-lg bg-surface-container text-on-surface font-semibold cursor-pointer border-0" onclick="window.ArbaApp.closeModal()">
-              Batal
-            </button>
-            <button type="button" id="btn-exec-outlet-import" class="px-4 py-2 rounded-lg bg-primary text-white font-semibold cursor-pointer border-0 flex items-center gap-1.5">
-              <span class="material-symbols-outlined text-[16px]">cloud_upload</span>
-              <span>Proses Migrasi Data Outlet</span>
-            </button>
-          </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" onclick="window.ArbaApp.closeModal()">Batal</button>
+          <button type="button" id="btn-exec-outlet-import" class="btn btn-primary">Impor</button>
         </div>
       </div>
     `;
@@ -1128,29 +621,17 @@
 
     setTimeout(function () {
       var btnDl = document.getElementById('btn-download-outlet-template');
-      var btnSample = document.getElementById('btn-load-outlet-sample');
       var fileInput = document.getElementById('input-outlet-csv-file');
       var txtArea = document.getElementById('textarea-outlet-csv');
       var btnExec = document.getElementById('btn-exec-outlet-import');
 
-      if (btnDl) {
-        btnDl.onclick = function () {
-          window.ArbaUtils.downloadCsv('Template_Migrasi_Outlet_B2B_ArbaConnect.csv', sampleCsv);
-        };
-      }
-      if (btnSample && txtArea) {
-        btnSample.onclick = function () {
-          txtArea.value = sampleCsv;
-        };
-      }
+      if (btnDl) btnDl.onclick = function () { window.ArbaUtils.downloadCsv('Template_Outlet_ArbaConnect.csv', sampleCsv); };
       if (fileInput && txtArea) {
         fileInput.onchange = function (e) {
           var f = e.target.files && e.target.files[0];
           if (!f) return;
           var reader = new FileReader();
-          reader.onload = function (ev) {
-            txtArea.value = String(ev.target.result || '');
-          };
+          reader.onload = function (ev) { txtArea.value = String(ev.target.result || ''); };
           reader.readAsText(f);
         };
       }
@@ -1168,58 +649,54 @@
     }, 30);
   }
 
-  // Modal 1: Register Outlet Baru
   function openNewOutletModal() {
     var outlets = window.ArbaStore.getState().outlets;
+    var salesTeam = window.ArbaStore.getState().salesTeam || [];
     var autoCode = 'AP-SLO-' + String(168 + outlets.length + 1).padStart(3, '0');
 
     var modalHtml = `
       <div class="modal-dialog max-w-2xl">
         <div class="modal-header">
-          <div class="flex items-center gap-2">
-            <span class="material-symbols-outlined text-primary text-[24px]">add_business</span>
-            <h2 class="modal-title">Registrasi Outlet B2B Baru</h2>
-          </div>
-          <button class="icon-btn" onclick="window.ArbaApp.closeModal()">
+          <h3 class="modal-title">Tambah Outlet Baru</h3>
+          <button class="icon-btn" onclick="window.ArbaApp.closeModal()" type="button">
             <span class="material-symbols-outlined text-[20px]">close</span>
           </button>
         </div>
 
         <form id="form-new-outlet">
           <div class="modal-body text-xs">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div class="flex flex-col gap-1">
-                <label class="font-semibold text-on-surface">Kode Outlet (Auto Generated)</label>
-                <input readOnly type="text" value="${autoCode}" class="bg-surface-container-low text-on-surface px-3 py-2 rounded-lg font-mono text-xs border border-border-subtle/50 cursor-not-allowed" />
+            <div class="form-grid-2">
+              <div class="form-group">
+                <label class="form-label">Kode Outlet</label>
+                <input readOnly type="text" value="${autoCode}" class="form-input font-mono cursor-not-allowed" />
               </div>
-
-              <div class="flex flex-col gap-1">
-                <label class="font-semibold text-on-surface">Tipe Outlet *</label>
-                <select id="new-type" required class="bg-surface-container-low text-on-surface px-3 py-2 rounded-lg text-xs border border-border-subtle/50 cursor-pointer">
+              <div class="form-group">
+                <label class="form-label">Tipe Outlet *</label>
+                <select id="new-type" required class="form-select">
                   <option value="Apotek Mandiri">Apotek Mandiri</option>
-                  <option value="Jaringan Farmasi">Jaringan Farmasi (Kimia Farma / K-24 / Roxy)</option>
-                  <option value="Minimarket">Minimarket / Supermarket Ritel</option>
+                  <option value="Jaringan Farmasi">Jaringan Farmasi</option>
+                  <option value="Minimarket">Minimarket</option>
                 </select>
               </div>
+            </div>
 
-              <div class="md:col-span-2 flex flex-col gap-1" style="grid-column: span 2 / span 2;">
-                <label class="font-semibold text-on-surface">Nama Resmi Outlet / Toko *</label>
-                <input id="new-name" required type="text" placeholder="Contoh: Apotek K-24 Nusukan Solo" class="bg-surface-container-low text-on-surface px-3 py-2 rounded-lg text-xs border border-border-subtle/50" />
+            <div class="form-group">
+              <label class="form-label">Nama Outlet *</label>
+              <input id="new-name" required type="text" placeholder="Nama apotek atau toko" class="form-input" />
+            </div>
+
+            <div class="form-grid-2">
+              <div class="form-group">
+                <label class="form-label">Penanggung Jawab *</label>
+                <input id="new-pic" required type="text" placeholder="Nama apoteker / PIC" class="form-input" />
               </div>
-
-              <div class="flex flex-col gap-1">
-                <label class="font-semibold text-on-surface">Apoteker / Penanggung Jawab *</label>
-                <input id="new-pic" required type="text" placeholder="Nama lengkap &amp; gelar" class="bg-surface-container-low text-on-surface px-3 py-2 rounded-lg text-xs border border-border-subtle/50" />
+              <div class="form-group">
+                <label class="form-label">No. WhatsApp *</label>
+                <input id="new-phone" required type="tel" placeholder="08xxxxxxxxxx" class="form-input" />
               </div>
-
-              <div class="flex flex-col gap-1">
-                <label class="font-semibold text-on-surface">No. WhatsApp Aktif *</label>
-                <input id="new-phone" required type="tel" placeholder="08xxxxxxxxxx" class="bg-surface-container-low text-on-surface px-3 py-2 rounded-lg text-xs border border-border-subtle/50" />
-              </div>
-
-              <div class="flex flex-col gap-1">
-                <label class="font-semibold text-on-surface">Kota / Kabupaten (Solo Raya) *</label>
-                <select id="new-city" required class="bg-surface-container-low text-on-surface px-3 py-2 rounded-lg text-xs border border-border-subtle/50 cursor-pointer">
+              <div class="form-group">
+                <label class="form-label">Kota / Kabupaten *</label>
+                <select id="new-city" required class="form-select">
                   <option value="Solo">Surakarta / Solo</option>
                   <option value="Sukoharjo">Sukoharjo</option>
                   <option value="Karanganyar">Karanganyar</option>
@@ -1228,45 +705,40 @@
                   <option value="Sragen">Sragen</option>
                 </select>
               </div>
-
-              <div class="flex flex-col gap-1">
-                <label class="font-semibold text-on-surface">Sales Dedikasi Lapangan *</label>
-                <select id="new-sales" required class="bg-surface-container-low text-on-surface px-3 py-2 rounded-lg text-xs border border-border-subtle/50 cursor-pointer">
-                  <option value="Budi Santoso">Budi Santoso (Solo Tengah)</option>
-                  <option value="Tri Wahyuni">Tri Wahyuni (Sukoharjo - Solo Baru)</option>
-                  <option value="Agus Hermawan">Agus Hermawan (Karanganyar - Sragen)</option>
-                  <option value="Rian Pratama">Rian Pratama (Klaten - Boyolali)</option>
+              <div class="form-group">
+                <label class="form-label">Sales Rep *</label>
+                <select id="new-sales" required class="form-select">
+                  ${salesTeam.map(function (s) {
+                    return `<option value="${s.name}">${s.name} (${s.area})</option>`;
+                  }).join('')}
                 </select>
               </div>
+            </div>
 
-              <div class="md:col-span-2 flex flex-col gap-1" style="grid-column: span 2 / span 2;">
-                <label class="font-semibold text-on-surface">Alamat Lengkap Outlet &amp; Patokan Pengiriman *</label>
-                <textarea id="new-address" required rows="2" placeholder="Jl. Raya No. XX, Kelurahan, Kecamatan..." class="bg-surface-container-low text-on-surface px-3 py-2 rounded-lg text-xs border border-border-subtle/50"></textarea>
-              </div>
+            <div class="form-group">
+              <label class="form-label">Alamat *</label>
+              <textarea id="new-address" required rows="2" placeholder="Alamat lengkap" class="form-textarea"></textarea>
+            </div>
 
-              <div class="flex flex-col gap-1">
-                <label class="font-semibold text-on-surface">Termin Pembayaran Disepakati *</label>
-                <select id="new-terms" required class="bg-surface-container-low text-on-surface px-3 py-2 rounded-lg text-xs border border-border-subtle/50 cursor-pointer">
-                  <option value="Net 30 Hari">Net 30 Hari (Standar Apotek)</option>
-                  <option value="Net 14 Hari">Net 14 Hari (Minimarket)</option>
-                  <option value="COD Cash">COD / Cash On Delivery (Mitra Baru)</option>
+            <div class="form-grid-2">
+              <div class="form-group">
+                <label class="form-label">Termin Pembayaran *</label>
+                <select id="new-terms" required class="form-select">
+                  <option value="Net 30 Hari">Net 30 Hari</option>
+                  <option value="Net 14 Hari">Net 14 Hari</option>
+                  <option value="COD Cash">COD Cash</option>
                 </select>
               </div>
-
-              <div class="flex flex-col gap-1">
-                <label class="font-semibold text-on-surface">Plafon Kredit Awal (IDR)</label>
-                <input id="new-limit" type="number" value="10000000" class="bg-surface-container-low text-on-surface px-3 py-2 rounded-lg font-mono font-bold text-xs border border-border-subtle/50" />
+              <div class="form-group">
+                <label class="form-label">Plafon Kredit (IDR)</label>
+                <input id="new-limit" type="number" value="10000000" class="form-input font-mono font-bold" />
               </div>
             </div>
           </div>
 
           <div class="modal-footer">
-            <button onclick="window.ArbaApp.closeModal()" class="btn btn-outline" type="button">
-              Batal
-            </button>
-            <button type="submit" class="btn btn-primary">
-              Simpan &amp; Daftarkan Kemitraan
-            </button>
+            <button onclick="window.ArbaApp.closeModal()" class="btn btn-outline" type="button">Batal</button>
+            <button type="submit" class="btn btn-primary">Simpan</button>
           </div>
         </form>
       </div>
@@ -1302,72 +774,47 @@
     }, 50);
   }
 
-  // Modal 2: WhatsApp Assistant
   function openWhatsAppModal(outlet) {
-    var template = 'delivery';
-
     function getMessage(tpl) {
       if (tpl === 'delivery') {
-        return `Halo Ibu/Bapak ${outlet.picName}, menginformasikan bahwa pesanan produk herbal CV Arba'in untuk ${outlet.name} telah diproses gudang Kartasura dan siap dikirim dengan armada hari ini. Mohon stempel penerimaan disiapkan.`;
-      } else if (tpl === 'invoice') {
-        return `Halo Ibu/Bapak ${outlet.picName}, menginformasikan jatuh tempo faktur termin ${outlet.terms} untuk ${outlet.name}. Pemakaian kredit saat ini ${window.ArbaUtils.formatRupiah(outlet.creditUsed)} dari plafon ${window.ArbaUtils.formatRupiah(outlet.creditLimit)}. Terima kasih atas kerjasamanya.`;
-      } else {
-        return `Halo Ibu/Bapak ${outlet.picName}, penawaran spesial CV Arba'in Solo Raya: Diskon bundling 12% untuk Madu Randu 500g dan Habbatussauda Oil Softgel 100s bagi apotek mitra minggu ini!`;
+        return `Halo ${outlet.picName}, pesanan CV Arba'in untuk ${outlet.name} siap dikirim hari ini.`;
       }
+      if (tpl === 'invoice') {
+        return `Halo ${outlet.picName}, pengingat faktur ${outlet.terms} untuk ${outlet.name}. Pemakaian kredit: ${window.ArbaUtils.formatRupiah(outlet.creditUsed)}.`;
+      }
+      return `Halo ${outlet.picName}, penawaran bundling CV Arba'in tersedia untuk ${outlet.name}.`;
     }
 
     var modalHtml = `
       <div class="modal-dialog max-w-lg">
         <div class="modal-header">
-          <div class="flex items-center gap-2">
-            <span class="material-symbols-outlined text-emerald-600 text-[24px]">chat</span>
-            <h3 class="modal-title">Asisten Komunikasi WhatsApp PIC</h3>
-          </div>
-          <button class="icon-btn" onclick="window.ArbaApp.closeModal()">
+          <h3 class="modal-title">Pesan WhatsApp PIC</h3>
+          <button class="icon-btn" onclick="window.ArbaApp.closeModal()" type="button">
             <span class="material-symbols-outlined text-[20px]">close</span>
           </button>
         </div>
 
-        <div class="modal-body text-xs">
-          <div class="bg-surface-container-low p-3 rounded-lg flex items-center gap-3">
-            <div class="w-10 h-10 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold" style="width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center;">
-              <span class="material-symbols-outlined text-[20px]">person</span>
-            </div>
-            <div class="flex flex-col">
-              <span class="font-bold text-sm text-on-surface">${outlet.picName}</span>
-              <span class="text-xs text-on-surface-variant font-mono">${outlet.picPhone} • ${outlet.name}</span>
-            </div>
+        <div class="modal-body text-xs space-y-3">
+          <div class="bg-surface-container-low p-3 rounded-lg">
+            <div class="font-bold text-sm text-on-surface">${window.ArbaUtils.escapeHtml(outlet.picName)}</div>
+            <div class="text-xs text-on-surface-variant font-mono">${window.ArbaUtils.escapeHtml(outlet.picPhone)} · ${window.ArbaUtils.escapeHtml(outlet.name)}</div>
           </div>
 
-          <div class="flex flex-col gap-2">
-            <label class="font-semibold text-on-surface-variant">Pilih Template Pesan Cepat:</label>
-            <div class="grid grid-cols-3 gap-2">
-              <button id="wa-tpl-delivery" type="button" class="px-2.5 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer text-center bg-primary text-white border-primary">
-                Jadwal Kirim
-              </button>
-              <button id="wa-tpl-invoice" type="button" class="px-2.5 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer text-center bg-surface-container text-on-surface border-border-subtle/50">
-                Tagihan Tempo
-              </button>
-              <button id="wa-tpl-promo" type="button" class="px-2.5 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer text-center bg-surface-container text-on-surface border-border-subtle/50">
-                Promo Bundling
-              </button>
-            </div>
+          <div class="grid grid-cols-3 gap-2">
+            <button id="wa-tpl-delivery" type="button" class="btn btn-sm btn-primary">Jadwal Kirim</button>
+            <button id="wa-tpl-invoice" type="button" class="btn btn-sm btn-outline">Tagihan</button>
+            <button id="wa-tpl-promo" type="button" class="btn btn-sm btn-outline">Promo</button>
+          </div>
 
-            <div class="mt-2">
-              <label class="font-semibold text-on-surface-variant block mb-1">Pratinjau Pesan:</label>
-              <textarea id="wa-msg-preview" rows="4" readonly class="w-full p-2.5 bg-surface-container-low rounded-lg text-xs text-on-surface border border-border-subtle/40 focus:outline-none">${getMessage('delivery')}</textarea>
-            </div>
+          <div class="form-group">
+            <label class="form-label">Pesan</label>
+            <textarea id="wa-msg-preview" rows="4" class="form-textarea">${getMessage('delivery')}</textarea>
           </div>
         </div>
 
         <div class="modal-footer">
-          <button onclick="window.ArbaApp.closeModal()" class="btn btn-outline" type="button">
-            Batal
-          </button>
-          <button id="btn-send-wa" class="btn btn-primary" style="background:#059669;" type="button">
-            <span class="material-symbols-outlined text-[16px]">send</span>
-            <span>Kirim via WhatsApp Web</span>
-          </button>
+          <button onclick="window.ArbaApp.closeModal()" class="btn btn-outline" type="button">Batal</button>
+          <button id="btn-send-wa" class="btn btn-primary" type="button">Buka WhatsApp</button>
         </div>
       </div>
     `;
@@ -1382,14 +829,11 @@
       var btnSend = document.getElementById('btn-send-wa');
 
       function setTemplate(tpl) {
-        template = tpl;
         preview.value = getMessage(tpl);
-        [btnDeliv, btnInv, btnPromo].forEach(function (b) {
-          b.className = 'px-2.5 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer text-center bg-surface-container text-on-surface border-border-subtle/50';
-        });
-        if (tpl === 'delivery') btnDeliv.className = 'px-2.5 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer text-center bg-primary text-white border-primary';
-        if (tpl === 'invoice') btnInv.className = 'px-2.5 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer text-center bg-primary text-white border-primary';
-        if (tpl === 'promo') btnPromo.className = 'px-2.5 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer text-center bg-primary text-white border-primary';
+        [btnDeliv, btnInv, btnPromo].forEach(function (b) { b.className = 'btn btn-sm btn-outline'; });
+        if (tpl === 'delivery') btnDeliv.className = 'btn btn-sm btn-primary';
+        if (tpl === 'invoice') btnInv.className = 'btn btn-sm btn-primary';
+        if (tpl === 'promo') btnPromo.className = 'btn btn-sm btn-primary';
       }
 
       if (btnDeliv) btnDeliv.onclick = function () { setTemplate('delivery'); };
@@ -1400,23 +844,18 @@
         btnSend.onclick = function () {
           var cleanPhone = outlet.picPhone.replace(/\D/g, '');
           window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(preview.value)}`, '_blank');
-          window.ArbaApp.showToast(`Membuka WhatsApp untuk ${outlet.picName}`, 'chat');
           window.ArbaApp.closeModal();
         };
       }
     }, 50);
   }
 
-  // Modal 3: Jadwalkan Kunjungan Sales
   function openVisitModal(outlet) {
     var modalHtml = `
       <div class="modal-dialog max-w-lg">
         <div class="modal-header">
-          <div class="flex items-center gap-2">
-            <span class="material-symbols-outlined text-primary text-[24px]">calendar_month</span>
-            <h3 class="modal-title">Jadwalkan Kunjungan Sales Rep</h3>
-          </div>
-          <button class="icon-btn" onclick="window.ArbaApp.closeModal()">
+          <h3 class="modal-title">Jadwalkan Kunjungan</h3>
+          <button class="icon-btn" onclick="window.ArbaApp.closeModal()" type="button">
             <span class="material-symbols-outlined text-[20px]">close</span>
           </button>
         </div>
@@ -1424,46 +863,40 @@
         <form id="form-schedule-visit">
           <div class="modal-body text-xs">
             <div class="bg-surface-container-low p-3 rounded-lg space-y-1">
-              <span class="text-on-surface-variant block">Outlet Mitra:</span>
-              <span class="font-bold text-sm text-on-surface block">${outlet.name}</span>
-              <span class="text-slate-500">${outlet.address} • Wilayah: ${outlet.cityName}</span>
+              <div class="font-bold text-sm text-on-surface">${window.ArbaUtils.escapeHtml(outlet.name)}</div>
+              <div class="text-on-surface-variant">${window.ArbaUtils.escapeHtml(outlet.address)} · ${window.ArbaUtils.escapeHtml(outlet.cityName)}</div>
             </div>
 
-            <div class="grid grid-cols-2 gap-3">
-              <div class="flex flex-col gap-1">
-                <label class="font-semibold text-on-surface-variant">Sales Dedikasi</label>
-                <input type="text" readOnly value="${outlet.salesRep}" class="p-2 bg-surface-container-low rounded-lg text-xs font-semibold text-on-surface border border-border-subtle/50" />
+            <div class="form-grid-2">
+              <div class="form-group">
+                <label class="form-label">Sales Rep</label>
+                <input type="text" readOnly value="${window.ArbaUtils.escapeHtml(outlet.salesRep)}" class="form-input font-semibold" />
               </div>
-              <div class="flex flex-col gap-1">
-                <label class="font-semibold text-on-surface-variant">Tujuan Kunjungan *</label>
-                <select id="visit-purpose" class="p-2 bg-surface-container-low rounded-lg text-xs text-on-surface cursor-pointer border border-border-subtle/50">
+              <div class="form-group">
+                <label class="form-label">Tujuan</label>
+                <select id="visit-purpose" class="form-select">
                   <option value="Kunjungan Rutin">Kunjungan Rutin</option>
                   <option value="Penagihan Tempo">Penagihan Tempo</option>
                   <option value="Promosi Bundling">Promosi Bundling</option>
-                  <option value="Follow Up At-Risk">Follow Up At-Risk</option>
+                  <option value="Follow Up At-Risk">Follow Up</option>
                 </select>
               </div>
             </div>
 
-            <div class="flex flex-col gap-1">
-              <label class="font-semibold text-on-surface-variant">Waktu Rencana Kunjungan *</label>
-              <input id="visit-date" type="datetime-local" required value="2026-04-02T10:00" class="p-2 bg-surface-container-low rounded-lg text-xs text-on-surface border border-border-subtle/50" />
+            <div class="form-group">
+              <label class="form-label">Waktu Kunjungan *</label>
+              <input id="visit-date" type="datetime-local" required value="2026-04-02T10:00" class="form-input" />
             </div>
 
-            <div class="flex flex-col gap-1">
-              <label class="font-semibold text-on-surface-variant">Catatan Instruksi Sales *</label>
-              <textarea id="visit-notes" rows="2" required class="p-2 bg-surface-container-low rounded-lg text-xs text-on-surface border border-border-subtle/50">Pengecekan display produk dan pengambilan pesanan baru</textarea>
+            <div class="form-group">
+              <label class="form-label">Catatan *</label>
+              <textarea id="visit-notes" rows="2" required class="form-textarea">Cek display dan ambil order</textarea>
             </div>
           </div>
 
           <div class="modal-footer">
-            <button onclick="window.ArbaApp.closeModal()" class="btn btn-outline" type="button">
-              Batal
-            </button>
-            <button type="submit" class="btn btn-primary">
-              <span class="material-symbols-outlined text-[16px]">event_available</span>
-              <span>Simpan Agenda Kunjungan</span>
-            </button>
+            <button onclick="window.ArbaApp.closeModal()" class="btn btn-outline" type="button">Batal</button>
+            <button type="submit" class="btn btn-primary">Simpan</button>
           </div>
         </form>
       </div>
@@ -1490,98 +923,77 @@
     }, 50);
   }
 
-  // Modal 4: Riwayat Transaksi & Audit Faktur
   function openHistoryModal(outlet) {
     var orders = window.ArbaStore.getState().orders;
     var outletOrders = orders.filter(function (o) {
       return o.outletName.toLowerCase().indexOf(outlet.name.toLowerCase()) !== -1 ||
-             o.outletId === outlet.code;
+             o.outletId === outlet.code || o.outletId === outlet.id;
     });
 
     var modalHtml = `
       <div class="modal-dialog max-w-2xl">
         <div class="modal-header">
-          <div class="flex items-center gap-2">
-            <span class="material-symbols-outlined text-primary text-[24px]">receipt_long</span>
-            <div>
-              <h3 class="modal-title">Riwayat Transaksi &amp; Audit Faktur</h3>
-              <span class="text-xs text-on-surface-variant">${outlet.name} (${outlet.code})</span>
-            </div>
+          <div>
+            <h3 class="modal-title">Riwayat Transaksi</h3>
+            <span class="text-xs text-on-surface-variant">${window.ArbaUtils.escapeHtml(outlet.name)} (${window.ArbaUtils.escapeHtml(outlet.code)})</span>
           </div>
-          <button class="icon-btn" onclick="window.ArbaApp.closeModal()">
+          <button class="icon-btn" onclick="window.ArbaApp.closeModal()" type="button">
             <span class="material-symbols-outlined text-[20px]">close</span>
           </button>
         </div>
 
         <div class="modal-body text-xs">
-          <!-- Credit Gauge Summary -->
           <div class="grid grid-cols-3 gap-3 p-3 bg-surface-container-low rounded-xl text-center">
             <div>
-              <span class="text-[11px] text-on-surface-variant block uppercase font-medium">Plafon Disetujui</span>
+              <span class="text-[11px] text-on-surface-variant block uppercase font-medium">Plafon</span>
               <span class="font-bold text-sm text-on-surface font-mono">${window.ArbaUtils.formatRupiah(outlet.creditLimit)}</span>
             </div>
             <div>
-              <span class="text-[11px] text-on-surface-variant block uppercase font-medium">Pemakaian Berjalan</span>
+              <span class="text-[11px] text-on-surface-variant block uppercase font-medium">Terpakai</span>
               <span class="font-bold text-sm text-amber-700 font-mono">${window.ArbaUtils.formatRupiah(outlet.creditUsed)}</span>
             </div>
             <div>
-              <span class="text-[11px] text-on-surface-variant block uppercase font-medium">Sisa Plafon Tersedia</span>
+              <span class="text-[11px] text-on-surface-variant block uppercase font-medium">Sisa</span>
               <span class="font-bold text-sm text-emerald-700 font-mono">${window.ArbaUtils.formatRupiah(outlet.creditRemaining)}</span>
             </div>
           </div>
 
-          <!-- History Table -->
-          <div>
-            <h4 class="font-semibold text-xs text-on-surface mb-2">Faktur Terbit &amp; Pemesanan Lapangan:</h4>
-            <div class="overflow-x-auto rounded-lg border border-border-subtle/40">
-              <table class="w-full text-left border-collapse text-xs">
-                <thead class="bg-surface-container-high text-on-surface-variant font-semibold">
-                  <tr>
-                    <th class="p-2.5">No. Faktur</th>
-                    <th class="p-2.5">Waktu</th>
-                    <th class="p-2.5">Nilai Transaksi</th>
-                    <th class="p-2.5">Termin</th>
-                    <th class="p-2.5 text-center">Status</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-border-subtle/30">
-                  ${outletOrders.map(function (ord) {
-                    return `
-                      <tr class="hover:bg-surface-container-low">
-                        <td class="p-2.5 font-mono font-semibold text-primary">${ord.clientUuid}</td>
-                        <td class="p-2.5 text-slate-500">${ord.orderTime}</td>
-                        <td class="p-2.5 font-semibold font-mono">${window.ArbaUtils.formatRupiah(ord.totalAmount)}</td>
-                        <td class="p-2.5">${ord.terms}</td>
-                        <td class="p-2.5 text-center">
-                          <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-status-success-bg text-status-success-text">
-                            ${ord.status}
-                          </span>
-                        </td>
-                      </tr>
-                    `;
-                  }).join('')}
-                  ${outletOrders.length === 0 ? `
+          <div class="table-container">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Faktur</th>
+                  <th>Waktu</th>
+                  <th class="text-right">Total</th>
+                  <th>Termin</th>
+                  <th class="text-center">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${outletOrders.map(function (ord) {
+                  return `
                     <tr>
-                      <td colspan="5" class="p-4 text-center text-slate-400">
-                        Belum ada transaksi historis terekam pada periode ini.
-                      </td>
+                      <td class="font-mono font-semibold text-primary">${window.ArbaUtils.escapeHtml(ord.clientUuid)}</td>
+                      <td class="text-on-surface-variant">${window.ArbaUtils.escapeHtml(ord.orderTime)}</td>
+                      <td class="text-right font-semibold font-mono">${window.ArbaUtils.formatRupiah(ord.totalAmount)}</td>
+                      <td>${window.ArbaUtils.escapeHtml(ord.terms)}</td>
+                      <td class="text-center"><span class="badge badge-success">${window.ArbaUtils.escapeHtml(ord.status)}</span></td>
                     </tr>
-                  ` : ''}
-                </tbody>
-              </table>
-            </div>
+                  `;
+                }).join('')}
+                ${outletOrders.length === 0 ? `
+                  <tr><td colspan="5" class="p-4 text-center text-on-surface-variant">Belum ada transaksi.</td></tr>
+                ` : ''}
+              </tbody>
+            </table>
           </div>
         </div>
 
-        <div class="modal-footer flex items-center justify-between">
-          <span class="text-xs text-slate-500">Kepatuhan Audit: Sesuai Buku Besar Piutang Solo Raya</span>
-          <button
-            type="button"
-            onclick="window.ArbaApp.showToast('Mencetak rekening koran mitra ${window.ArbaUtils.escapeHtml(outlet.name)}', 'print'); window.print();"
-            class="btn btn-outline text-primary text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
-          >
+        <div class="modal-footer">
+          <button onclick="window.ArbaApp.closeModal()" class="btn btn-outline" type="button">Tutup</button>
+          <button type="button" onclick="window.print();" class="btn btn-primary">
             <span class="material-symbols-outlined text-[16px]">print</span>
-            <span>Cetak Rekap Piutang</span>
+            <span>Cetak</span>
           </button>
         </div>
       </div>

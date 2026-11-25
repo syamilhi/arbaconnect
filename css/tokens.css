@@ -130,9 +130,9 @@ html.dark {
   --color-status-danger-text: #f87171;
 }
 
-/* Base Scaling matching 90% desktop ERP density */
+/* Base density */
 html {
-  zoom: 0.9;
+  font-size: 14.5px;
   box-sizing: border-box;
   scroll-behavior: smooth;
 }

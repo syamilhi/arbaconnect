@@ -54,7 +54,7 @@
           </svg>
           <div class="header-brand-text">
             <span class="brand-title">ArbaConnect</span>
-            <span class="brand-subtitle" id="header-brand-subtitle">Sistem Distribusi &amp; Stok Herbal CV Arba'in</span>
+            <span class="brand-subtitle" id="header-brand-subtitle">CV Arba'in Solo Raya</span>
           </div>
         </div>
 
@@ -117,37 +117,15 @@
             </button>
             <div id="header-notif-menu" class="notification-menu hidden">
               <div class="flex items-center justify-between pb-2 border-b border-border-subtle">
-                <span class="font-semibold text-xs text-on-surface">Notifikasi Sistem</span>
-                <span id="notif-pending-count-label" class="text-xs text-primary font-medium">0 Pesanan Baru</span>
+                <span class="font-semibold text-xs text-on-surface">Notifikasi</span>
+                <span id="notif-pending-count-label" class="text-xs text-primary font-medium">0 Menunggu</span>
               </div>
-              <div class="flex flex-col gap-1.5 py-1 text-xs">
-                <div id="notif-item-order" class="search-item flex items-center gap-2 cursor-pointer p-2 rounded-lg hover:bg-surface-container-low transition-colors">
-                  <span class="material-symbols-outlined text-primary text-[18px] shrink-0">shopping_bag</span>
-                  <div class="flex flex-col">
-                    <span class="font-medium text-on-surface">Pesanan Baru Siap Validasi</span>
-                    <span class="text-[11px] text-on-surface-variant">Klik untuk membuka antrean pesanan</span>
-                  </div>
-                </div>
-                <div id="notif-item-rop" class="search-item flex items-center gap-2 cursor-pointer p-2 rounded-lg hover:bg-surface-container-low transition-colors">
-                  <span class="material-symbols-outlined text-amber-600 text-[18px] shrink-0">warning</span>
-                  <div class="flex flex-col">
-                    <span class="font-medium text-on-surface">Peringatan Reorder Point (ROP)</span>
-                    <span class="text-[11px] text-on-surface-variant">Madu Randu mendekati ambang batas</span>
-                  </div>
-                </div>
-                <div id="notif-item-cdob" class="search-item flex items-center gap-2 cursor-pointer p-2 rounded-lg hover:bg-surface-container-low transition-colors">
-                  <span class="material-symbols-outlined text-emerald-600 text-[18px] shrink-0">verified</span>
-                  <div class="flex flex-col">
-                    <span class="font-medium text-on-surface">Validasi Integritas CDOB &amp; FEFO</span>
-                    <span class="text-[11px] text-on-surface-variant">99.4% Kepatuhan batch tervalidasi</span>
-                  </div>
-                </div>
-              </div>
+              <div id="header-notif-list" class="flex flex-col gap-1.5 py-1 text-xs"></div>
             </div>
           </div>
 
-          <!-- User Profile Pill & Logout / Switch Role Button -->
-          <div id="header-profile-pill" class="flex items-center gap-2 pl-2 border-l border-border-subtle cursor-pointer hover:opacity-80 transition-opacity" title="Klik untuk Profil Akun, Hak Akses Modul &amp; Ganti User">
+          <!-- User Profile Pill & Logout Button -->
+          <div id="header-profile-pill" class="flex items-center gap-2 pl-2 border-l border-border-subtle cursor-pointer hover:opacity-80 transition-opacity" title="Profil &amp; Pengaturan Akun">
             <div id="header-profile-avatar" class="w-8 h-8 rounded-full bg-primary/10 text-primary border border-primary/20 flex items-center justify-center font-bold text-xs">
               AZ
             </div>
@@ -156,8 +134,8 @@
               <span class="text-[11px] text-on-surface-variant leading-none">Direktur Operasional</span>
             </div>
           </div>
-          <button id="header-logout-btn" class="icon-btn" type="button" title="Ganti Akun / Login Per Role / Logout" aria-label="Ganti Akun atau Logout">
-            <span class="material-symbols-outlined text-[18px]">switch_account</span>
+          <button id="header-logout-btn" class="icon-btn" type="button" title="Keluar" aria-label="Keluar">
+            <span class="material-symbols-outlined text-[18px]">logout</span>
           </button>
         </div>
       </header>
@@ -178,83 +156,61 @@
           </div>
 
           <nav class="sidebar-nav">
-            <!-- 1. Dasbor Direksi & Manajemen -->
-            <button class="nav-button active" data-path="executive-dashboard" type="button" title="Dasbor Direksi &amp; Pemantauan Bisnis">
+            <button class="nav-button active" data-path="executive-dashboard" type="button" title="Dasbor">
               <div class="nav-button-content">
                 <span class="material-symbols-outlined text-[20px] shrink-0">dashboard</span>
-                <span class="nav-label" data-default-label="Dasbor Direksi">Dasbor Direksi</span>
+                <span class="nav-label" data-default-label="Dasbor">Dasbor</span>
               </div>
             </button>
 
-            <!-- 2. Gudang & Buku Besar Stok FEFO -->
-            <button class="nav-button" data-path="inventory-stock-ledger" type="button" title="Gudang &amp; Catatan Keluar-Masuk Stok (FEFO)">
+            <button class="nav-button" data-path="inventory-stock-ledger" type="button" title="Stok &amp; Gudang">
               <div class="nav-button-content">
                 <span class="material-symbols-outlined text-[20px] shrink-0">inventory_2</span>
-                <span class="nav-label" data-default-label="Gudang &amp; Stok FEFO">Gudang &amp; Stok FEFO</span>
+                <span class="nav-label" data-default-label="Stok &amp; Gudang">Stok &amp; Gudang</span>
               </div>
               <span id="badge-inventory" class="nav-badge-pill hidden">0</span>
             </button>
 
-            <!-- 3. Data Apotek & Konsinyasi -->
-            <button class="nav-button" data-path="b2b-crm-directory" type="button" title="Data Mitra Apotek, Plafon Kredit &amp; Barang Titipan">
+            <button class="nav-button" data-path="b2b-crm-directory" type="button" title="Mitra Outlet">
               <div class="nav-button-content">
                 <span class="material-symbols-outlined text-[20px] shrink-0">store</span>
-                <span class="nav-label" data-default-label="Data Apotek &amp; Konsinyasi">Data Apotek &amp; Konsinyasi</span>
+                <span class="nav-label" data-default-label="Mitra Outlet">Mitra Outlet</span>
               </div>
             </button>
 
-            <!-- 4. Verifikasi Faktur & Pengiriman -->
-            <button class="nav-button" data-path="order-approval-queue" type="button" title="Verifikasi Faktur Pesanan &amp; Jadwal Kirim Armada">
+            <button class="nav-button" data-path="order-approval-queue" type="button" title="Verifikasi Order">
               <div class="nav-button-content">
                 <span class="material-symbols-outlined text-[20px] shrink-0">fact_check</span>
-                <span class="nav-label" data-default-label="Verifikasi Faktur &amp; Kirim">Verifikasi Faktur &amp; Kirim</span>
+                <span class="nav-label" data-default-label="Verifikasi Order">Verifikasi Order</span>
               </div>
               <span id="badge-orders" class="nav-badge-pill hidden">0</span>
             </button>
 
-            <!-- 5. Aplikasi Sales Lapangan -->
-            <button class="nav-button" data-path="field-sales-pwa-preview" type="button" title="Aplikasi Harian Sales Lapangan (Input Nota &amp; Kunjungan)">
+            <button class="nav-button" data-path="field-sales-pwa-preview" type="button" title="Aplikasi Sales">
               <div class="nav-button-content">
                 <span class="material-symbols-outlined text-[20px] shrink-0">smartphone</span>
-                <span class="nav-label" data-default-label="Aplikasi Sales Lapangan">Aplikasi Sales Lapangan</span>
+                <span class="nav-label" data-default-label="Aplikasi Sales">Aplikasi Sales</span>
               </div>
             </button>
 
-            <!-- 6. Kelola Semua Akun Pegawai (Khusus Super Admin) -->
-            <button class="nav-button" data-path="user-management" type="button" title="Kelola Semua Akun Pegawai &amp; Hak Akses (Super Admin)">
+            <button class="nav-button" data-path="user-management" type="button" title="Manajemen User">
               <div class="nav-button-content">
                 <span class="material-symbols-outlined text-[20px] shrink-0">manage_accounts</span>
-                <span class="nav-label" data-default-label="Kelola Semua User">Kelola Semua User</span>
+                <span class="nav-label" data-default-label="Manajemen User">Manajemen User</span>
               </div>
             </button>
 
-            <!-- 7. Profil Saya & Ganti Password -->
-            <button class="nav-button" data-path="user-profile-settings" type="button" title="Edit Profil Saya &amp; Ganti Password">
+            <button class="nav-button" data-path="user-profile-settings" type="button" title="Profil &amp; Keamanan">
               <div class="nav-button-content">
                 <span class="material-symbols-outlined text-[20px] shrink-0">person_edit</span>
-                <span class="nav-label" data-default-label="Profil &amp; Ganti Password">Profil &amp; Ganti Password</span>
+                <span class="nav-label" data-default-label="Profil &amp; Keamanan">Profil &amp; Keamanan</span>
               </div>
             </button>
           </nav>
         </div>
 
-        <!-- Sidebar Bottom Compliance & Fold / Unfold Control -->
+        <!-- Sidebar Fold / Unfold Control -->
         <div class="sidebar-bottom px-2">
-          <!-- CDOB Compliance Status (Expanded) -->
-          <div class="cdob-full-card cdob-card">
-            <div class="cdob-card-header">
-              <span class="material-symbols-outlined text-[15px]">verified</span>
-              <span>Integritas CDOB &amp; FEFO</span>
-            </div>
-            <p>Penerapan mutasi stok tanggal kedaluwarsa terdekat aktif.</p>
-          </div>
-
-          <!-- CDOB Compliance Icon (Collapsed) -->
-          <div class="cdob-icon-only" title="Integritas CDOB &amp; FEFO Aktif">
-            <span class="material-symbols-outlined text-[18px]">verified</span>
-          </div>
-
-          <!-- Static Fold / Unfold Toggle Button -->
           <button id="sidebar-toggle-btn" class="sidebar-toggle-btn" type="button" title="Buka Menu Samping">
             <span class="material-symbols-outlined text-[18px]">chevron_right</span>
           </button>
@@ -263,21 +219,19 @@
 
       <!-- App Content Wrapper -->
       <div id="app-content-wrapper" class="app-content-wrapper">
-        <!-- Dynamic Role-Specific Context & Guidance Strip -->
-        <div id="role-context-strip" class="px-6 pt-4 pb-0"></div>
         <main id="main-view-container" class="main-view-container"></main>
 
         <!-- Application Footer -->
         <footer class="app-footer">
           <div class="flex items-center gap-2">
-            <span class="footer-version">ArbaConnect v2.5.0-Vanilla</span>
+            <span class="footer-version">ArbaConnect v3.0.0</span>
             <span>&bull;</span>
-            <span>Arsitektur Logistik Distribusi Herbal Solo Raya</span>
+            <span>CV Arba'in Solo Raya</span>
           </div>
           <div class="flex items-center gap-4 text-xs">
-            <span>Gudang Utama: Kartasura</span>
+            <span>Gudang Kartasura</span>
             <span>&bull;</span>
-            <span>Standar Kepatuhan: BPOM &amp; CDOB</span>
+            <span>Standar BPOM &amp; CDOB</span>
           </div>
         </footer>
       </div>

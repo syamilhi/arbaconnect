@@ -1,13 +1,5 @@
 /**
- * ArbaConnect ERP - Field Sales PWA Preview View
- * Features:
- * - Viewport Switcher: 390px Smartphone Frame vs Fullscreen layout
- * - Mobile Top Bar: Budi Santoso Profile, Network Status toggle (Online / Offline Queue)
- * - Step 1: Outdoor GPS Check-In (radius calculation & geofence verification) & Outlet Selector
- * - Step 2: Touch-friendly Product Order Catalog with big steppers (- and +) and category tabs
- * - Step 3: Payment terms & apoteker notes
- * - Sticky Bottom Checkout Bar (Total items & amount, submit button)
- * - 58mm Bluetooth Mobile Thermal Receipt Modal with WhatsApp sharing & print support
+ * ArbaConnect ERP - Field Sales Mobile View
  */
 
 (function () {
@@ -16,7 +8,7 @@
   window.ArbaViews = window.ArbaViews || {};
 
   var state = {
-    isPhoneFrame: true,
+    activeTab: 'outlet', // 'outlet' | 'produk' | 'nota'
     selectedOutletCode: 'AP-SLO-001',
     activeCategory: 'all',
     productSearch: '',
@@ -30,20 +22,498 @@
     shelfPhotoDataUrl: null,
     scannedQrBatches: [],
     isSubmitting: false,
-    gpsCheckedIn: true,
-    gpsDistance: 12,
-    checkinTime: '10:15 WIB'
+    gpsCheckedIn: false,
+    gpsOutletCode: null,
+    gpsDistance: null,
+    gpsSource: null,
+    gpsCoords: null,
+    checkinTime: ''
   };
 
-  function renderFieldSalesPwa(container) {
-    // Allow URL query override: ?pwa=full or ?pwa=phone
-    var urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get('pwa') === 'full') {
-      state.isPhoneFrame = false;
-    } else if (urlParams.get('pwa') === 'phone') {
-      state.isPhoneFrame = true;
+  function shortTerm(term) {
+    if (!term) return '-';
+    if (/konsinyasi/i.test(term)) return 'Konsinyasi';
+    if (/net\s*14/i.test(term)) return 'Net 14 Hari';
+    if (/cash|tunai/i.test(term)) return 'Tunai';
+    return term;
+  }
+
+  function shortDivision(division) {
+    if (!division) return 'Sales Lapangan';
+    return division
+      .replace(/^Divisi\s+/i, '')
+      .replace(/\s*\(([^)]+)\)/, ' · $1')
+      .trim();
+  }
+
+  function getCartItems(products) {
+    return Object.keys(state.cart)
+      .filter(function (sku) { return (state.cart[sku] || 0) > 0; })
+      .map(function (sku) {
+        var prod = products.find(function (p) { return p.sku === sku; });
+        var qty = state.cart[sku] || 0;
+        if (!prod) return null;
+        return {
+          sku: sku,
+          product: prod,
+          quantity: qty,
+          subtotal: prod.unitPrice * qty
+        };
+      })
+      .filter(Boolean);
+  }
+
+  function renderTopBar(appState, isFieldSalesRole, currentRep, repInitials, salesTeam, isOnline, offlineQueue) {
+    var divisionLabel = shortDivision(appState.currentUser && appState.currentUser.division);
+    var fullDivision = (appState.currentUser && appState.currentUser.division) || 'Sales Lapangan';
+
+    return `
+      <div class="pwa-header">
+        <div class="flex items-center gap-2.5 min-w-0 flex-1">
+          <div class="pwa-avatar">${repInitials}</div>
+          <div class="min-w-0 flex-1">
+            ${isFieldSalesRole ? `
+              <div class="font-bold text-xs leading-tight text-white truncate">${window.ArbaUtils.escapeHtml(currentRep)}</div>
+              <div class="text-[11px] text-teal-100 truncate" title="${window.ArbaUtils.escapeHtml(fullDivision)}">${window.ArbaUtils.escapeHtml(divisionLabel)}</div>
+            ` : `
+              <select
+                id="pwa-rep-select"
+                aria-label="Pilih akun sales"
+                class="font-bold text-xs leading-tight cursor-pointer border-0 w-full truncate"
+                style="background:transparent; color:#fff; padding:0;"
+              >
+                ${salesTeam.map(function (s) {
+                  return `<option value="${window.ArbaUtils.escapeHtml(s.name)}" style="color:#0f172a;" ${s.name === currentRep ? 'selected' : ''}>${window.ArbaUtils.escapeHtml(s.name)}</option>`;
+                }).join('')}
+              </select>
+              <div class="text-[11px] text-teal-100 truncate">Sales Lapangan · Solo Raya</div>
+            `}
+          </div>
+        </div>
+
+        <div class="flex items-center gap-1.5 shrink-0">
+          <button
+            id="btn-pwa-online-toggle"
+            title="Simulasi mode Online/Offline"
+            class="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold cursor-pointer border-0"
+            style="${isOnline ? 'background:rgba(255,255,255,0.18); color:#fff;' : 'background:#fbbf24; color:#0f172a;'}"
+            type="button"
+          >
+            <span
+              class="w-2 h-2 rounded-full"
+              style="display:inline-block; background:${isOnline ? '#6ee7b7' : '#451a03'};"
+            ></span>
+            <span>${isOnline ? 'Online' : 'Offline'}${!isOnline && offlineQueue.length > 0 ? ' (' + offlineQueue.length + ')' : ''}</span>
+          </button>
+          <button
+            id="btn-pwa-logout"
+            title="Keluar"
+            aria-label="Keluar"
+            class="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold cursor-pointer border-0"
+            style="background:rgba(255,255,255,0.14); color:#fff;"
+            type="button"
+          >
+            <span class="material-symbols-outlined text-[15px]">logout</span>
+            <span>Keluar</span>
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderOutletTab(currentOutlet, outlets, isCheckedInHere) {
+    var consItems = currentOutlet.consignmentItems || [];
+    var consSold = consItems.reduce(function (s, c) { return s + (c.soldQty || 0); }, 0);
+    var nearExpiryItems = consItems.filter(function (c) { return c.nearExpiry; });
+
+    return `
+      <div class="pwa-panel">
+        <div class="flex items-center justify-between gap-2">
+          <label for="pwa-outlet-select" class="text-[11px] uppercase tracking-wider font-bold text-on-surface-variant">
+            Outlet Aktif
+          </label>
+          <button
+            type="button"
+            id="btn-gps-checkin"
+            class="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold cursor-pointer border-0 ${
+              isCheckedInHere ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-900'
+            }"
+          >
+            <span class="material-symbols-outlined text-[14px]">
+              ${isCheckedInHere ? 'pin_drop' : 'location_searching'}
+            </span>
+            <span>${isCheckedInHere ? (state.gpsDistance !== null ? 'GPS ' + state.gpsDistance + 'm' : 'Check-in Manual') : 'Check-in'}</span>
+          </button>
+        </div>
+
+        <select
+          id="pwa-outlet-select"
+          aria-label="Pilih Outlet Mitra"
+          class="form-select text-xs font-semibold"
+        >
+          ${outlets.map(function (o) {
+            return `<option value="${window.ArbaUtils.escapeHtml(o.code)}" ${o.code === state.selectedOutletCode ? 'selected' : ''}>${window.ArbaUtils.escapeHtml(o.name)} (${window.ArbaUtils.escapeHtml(o.cityName)})</option>`;
+          }).join('')}
+        </select>
+
+        ${isCheckedInHere && state.checkinTime ? `
+          <div class="text-[11px] text-emerald-700 font-medium flex items-center gap-1">
+            <span class="material-symbols-outlined text-[13px]">check_circle</span>
+            <span>Check-in pukul ${window.ArbaUtils.escapeHtml(state.checkinTime)}</span>
+          </div>
+        ` : ''}
+
+        <div class="pwa-kpi-grid">
+          <div class="pwa-kpi-cell">
+            <div class="pwa-kpi-label">PIC</div>
+            <div class="pwa-kpi-val" title="${window.ArbaUtils.escapeHtml(currentOutlet.picName || '-')}">${window.ArbaUtils.escapeHtml(currentOutlet.picName || '-')}</div>
+          </div>
+          <div class="pwa-kpi-cell">
+            <div class="pwa-kpi-label">Termin</div>
+            <div class="pwa-kpi-val text-primary" title="${window.ArbaUtils.escapeHtml(currentOutlet.terms || '-')}">${window.ArbaUtils.escapeHtml(shortTerm(currentOutlet.terms))}</div>
+          </div>
+          <div class="pwa-kpi-cell">
+            <div class="pwa-kpi-label">Tagihan</div>
+            <div class="pwa-kpi-val font-mono text-emerald-700">${window.ArbaUtils.formatRupiah(currentOutlet.consignmentBillableAmount || 0)}</div>
+          </div>
+          <div class="pwa-kpi-cell">
+            <div class="pwa-kpi-label">Konsinyasi</div>
+            <div class="pwa-kpi-val">${currentOutlet.consignmentTotalUnits || 0} titip · ${consSold} laku</div>
+          </div>
+        </div>
+
+        ${nearExpiryItems.length > 0 ? `
+          <div class="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-[11px] space-y-1">
+            <div class="font-bold flex items-center gap-1">
+              <span class="material-symbols-outlined text-[14px]">warning</span>
+              <span>Dekat ED (${nearExpiryItems.length})</span>
+            </div>
+            ${nearExpiryItems.map(function (c) {
+              return `<div class="text-[11px]"><b>${window.ArbaUtils.escapeHtml(c.name)}</b> (${c.remainingQty} btl · ED ${window.ArbaUtils.escapeHtml(c.expiry)})</div>`;
+            }).join('')}
+          </div>
+        ` : ''}
+      </div>
+
+      <div class="grid grid-cols-3 gap-2">
+        <button
+          type="button"
+          id="btn-pwa-repeat-order"
+          class="btn btn-outline flex-col py-2.5 px-2 text-[11px]"
+          style="white-space:normal; line-height:1.2; gap:0.25rem;"
+        >
+          <span class="material-symbols-outlined text-[18px] text-primary">sync_saved_locally</span>
+          <span>Isi Laku</span>
+        </button>
+        <button
+          type="button"
+          id="btn-pwa-tsp-route"
+          class="btn btn-outline flex-col py-2.5 px-2 text-[11px]"
+          style="white-space:normal; line-height:1.2; gap:0.25rem;"
+        >
+          <span class="material-symbols-outlined text-[18px] text-emerald-700">route</span>
+          <span>Rute</span>
+        </button>
+        <button
+          type="button"
+          id="btn-pwa-visit-only"
+          class="btn btn-outline flex-col py-2.5 px-2 text-[11px]"
+          style="white-space:normal; line-height:1.2; gap:0.25rem;"
+        >
+          <span class="material-symbols-outlined text-[18px] text-on-surface-variant">where_to_vote</span>
+          <span>Kunjungan</span>
+        </button>
+      </div>
+    `;
+  }
+
+  function renderProdukTab(currentOutlet, filteredProducts) {
+    var categories = [
+      { id: 'all', label: 'Semua' },
+      { id: 'madu', label: 'Madu' },
+      { id: 'kapsul', label: 'Kapsul' },
+      { id: 'minyak', label: 'Minyak' },
+      { id: 'kosmetik', label: 'Kosmetik' }
+    ];
+
+    return `
+      <div class="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-surface-container-low border border-border-subtle text-[11px]">
+        <div class="truncate font-semibold text-on-surface">${window.ArbaUtils.escapeHtml(currentOutlet.name)}</div>
+        <button type="button" class="btn-pwa-goto-tab text-primary font-bold text-[11px] bg-transparent border-0 cursor-pointer shrink-0" data-tab="outlet">
+          Ganti
+        </button>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <div class="relative flex-1 min-w-0">
+          <span class="material-symbols-outlined text-on-surface-variant absolute left-2.5 top-2 text-[16px] pointer-events-none">search</span>
+          <input
+            id="pwa-search-input"
+            type="text"
+            placeholder="Cari produk atau SKU..."
+            value="${window.ArbaUtils.escapeHtml(state.productSearch)}"
+            class="form-input pl-8 py-1.5 text-xs"
+          />
+        </div>
+        <button
+          type="button"
+          id="btn-pwa-scan-qr"
+          class="btn btn-primary btn-sm shrink-0"
+          title="Scan QR Batch"
+        >
+          <span class="material-symbols-outlined text-[15px]">qr_code_scanner</span>
+          <span>QR</span>
+        </button>
+      </div>
+
+      <div class="flex items-center gap-1 overflow-x-auto pb-1 shrink-0">
+        ${categories.map(function (cat) {
+          var isCatActive = state.activeCategory === cat.id;
+          return `
+            <button
+              class="btn-pwa-cat px-2.5 py-1 rounded-md text-xs font-semibold cursor-pointer whitespace-nowrap border-0 ${
+                isCatActive ? 'bg-primary text-white' : 'bg-surface-container text-on-surface-variant'
+              }"
+              data-cat="${cat.id}"
+              type="button"
+            >
+              ${cat.label}
+            </button>
+          `;
+        }).join('')}
+      </div>
+
+      <div class="space-y-2">
+        ${filteredProducts.length === 0 ? `
+          <div class="pwa-panel items-center text-center py-6">
+            <span class="material-symbols-outlined text-on-surface-variant text-[24px]">inventory_2</span>
+            <div class="text-xs font-semibold text-on-surface">Produk tidak ditemukan</div>
+            <button type="button" id="btn-pwa-reset-filter" class="btn btn-outline btn-sm">Reset Filter</button>
+          </div>
+        ` : filteredProducts.map(function (prod) {
+          var qty = state.cart[prod.sku] || 0;
+          var isLow = prod.stock <= prod.rop;
+          var atMax = qty >= prod.stock;
+          var consItem = (currentOutlet.consignmentItems || []).find(function (c) { return c.sku === prod.sku; });
+
+          return `
+            <div class="pwa-product-card ${qty > 0 ? 'in-cart' : ''}">
+              <div class="min-w-0 flex-1">
+                <div class="font-semibold text-xs text-on-surface leading-snug">${window.ArbaUtils.escapeHtml(prod.name)}</div>
+                <div class="flex items-center gap-1.5 text-[11px] text-on-surface-variant mt-0.5">
+                  <span class="font-mono font-semibold text-on-surface">${window.ArbaUtils.formatRupiah(prod.unitPrice)}</span>
+                  <span>·</span>
+                  <span class="font-mono">Stok ${prod.stock}</span>
+                </div>
+                ${consItem ? `
+                  <div class="text-[10px] font-semibold mt-0.5 ${consItem.nearExpiry ? 'text-rose-700' : 'text-teal-700'}">
+                    Titip ${consItem.consignedQty} · Laku ${consItem.soldQty} · Sisa ${consItem.remainingQty}${consItem.nearExpiry ? ' · Dekat ED' : ''}
+                  </div>
+                ` : ''}
+                ${prod.stock === 0 ? `
+                  <div class="text-[10px] font-semibold text-rose-700 mt-0.5">Stok habis</div>
+                ` : isLow ? `
+                  <div class="text-[10px] font-semibold text-amber-700 mt-0.5">Stok rendah (&le; ${prod.rop})</div>
+                ` : (atMax && qty > 0 ? `
+                  <div class="text-[10px] font-medium text-amber-700 mt-0.5">Maksimal stok</div>
+                ` : '')}
+              </div>
+
+              <div class="pwa-stepper">
+                <button
+                  type="button"
+                  class="btn-stepper-minus pwa-stepper-btn pwa-stepper-minus"
+                  data-sku="${prod.sku}"
+                  aria-label="Kurangi ${window.ArbaUtils.escapeHtml(prod.name)}"
+                  ${qty === 0 ? 'disabled' : ''}
+                >
+                  -
+                </button>
+                <span class="w-7 text-center font-bold text-xs font-mono text-on-surface">${qty}</span>
+                <button
+                  type="button"
+                  class="btn-stepper-plus pwa-stepper-btn pwa-stepper-plus"
+                  data-sku="${prod.sku}"
+                  aria-label="Tambah ${window.ArbaUtils.escapeHtml(prod.name)}"
+                  ${atMax ? 'disabled' : ''}
+                >
+                  +
+                </button>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  function renderNotaTab(currentOutlet, cartItems, totalQuantity, overCredit) {
+    if (totalQuantity === 0) {
+      return `
+        <div class="pwa-panel items-center text-center py-6">
+          <span class="material-symbols-outlined text-on-surface-variant text-[36px]">shopping_bag</span>
+          <div class="text-xs font-bold text-on-surface">Keranjang masih kosong</div>
+          <div class="text-[11px] text-on-surface-variant">Pilih produk atau gunakan Isi Laku dari tab Outlet.</div>
+          <button type="button" class="btn btn-primary btn-sm btn-pwa-goto-tab" data-tab="produk">
+            Pilih Produk
+          </button>
+        </div>
+      `;
     }
 
+    return `
+      <div class="pwa-panel">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-on-surface">${window.ArbaUtils.escapeHtml(currentOutlet.name)} (${totalQuantity} unit)</span>
+          <button type="button" class="btn-pwa-goto-tab text-primary font-bold text-[11px] bg-transparent border-0 cursor-pointer" data-tab="produk">
+            Ubah
+          </button>
+        </div>
+        <div class="divide-y divide-border-subtle/40 text-xs">
+          ${cartItems.map(function (item) {
+            return `
+              <div class="flex items-center justify-between gap-2 py-1.5">
+                <span class="truncate text-on-surface">${window.ArbaUtils.escapeHtml(item.product.name)} <b class="font-mono">x${item.quantity}</b></span>
+                <span class="font-mono font-semibold text-on-surface shrink-0">${window.ArbaUtils.formatRupiah(item.subtotal)}</span>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+
+      <div class="pwa-panel">
+        <div class="form-group">
+          <label for="pwa-term-select" class="form-label text-[11px]">Termin Pembayaran</label>
+          <select id="pwa-term-select" class="form-select text-xs font-semibold">
+            <option value="Konsinyasi (Titip Jual)" ${state.selectedTerm === 'Konsinyasi (Titip Jual)' ? 'selected' : ''}>Konsinyasi (Titip Jual)</option>
+            <option value="Jatuh Tempo (Net 14 Hari)" ${state.selectedTerm === 'Jatuh Tempo (Net 14 Hari)' ? 'selected' : ''}>Jatuh Tempo (Net 14 Hari)</option>
+            <option value="Cash / Tunai di Awal" ${state.selectedTerm === 'Cash / Tunai di Awal' ? 'selected' : ''}>Cash / Tunai</option>
+          </select>
+          ${overCredit ? `
+            <span class="text-[11px] font-semibold text-rose-700">Melebihi sisa plafon (${window.ArbaUtils.formatRupiah(currentOutlet.creditRemaining || 0)})</span>
+          ` : ''}
+        </div>
+
+        <input
+          id="pwa-notes-input"
+          type="text"
+          value="${window.ArbaUtils.escapeHtml(state.orderNotes)}"
+          placeholder="Catatan apoteker (opsional)..."
+          class="form-input text-xs"
+        />
+      </div>
+
+      <div class="pwa-panel">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] font-bold text-on-surface flex items-center gap-1">
+            <span class="material-symbols-outlined text-[15px] text-primary">draw</span>
+            <span>Tanda Tangan (${window.ArbaUtils.escapeHtml(currentOutlet.picName || 'PIC')})</span>
+          </span>
+          <button
+            type="button"
+            id="btn-pwa-clear-sign"
+            class="px-2 py-0.5 rounded text-[10px] font-semibold cursor-pointer border-0 bg-surface-container text-on-surface-variant"
+          >
+            Hapus
+          </button>
+        </div>
+
+        <div class="rounded-lg border border-dashed border-slate-300 bg-white overflow-hidden relative">
+          <canvas id="pwa-signature-canvas" width="340" height="96" style="width:100%; height:96px; display:block; touch-action:none; cursor:crosshair;"></canvas>
+          ${state.signatureDataUrl ? `
+            <span style="position:absolute; right:6px; bottom:4px; font-size:9px; font-weight:700; color:#059669; background:#ecfdf5; padding:1px 5px; border-radius:4px;">Tersimpan</span>
+          ` : `
+            <span id="pwa-sign-hint" style="position:absolute; left:8px; bottom:6px; font-size:10px; color:#94a3b8; pointer-events:none;">Tanda tangan di sini</span>
+          `}
+        </div>
+
+        <div class="flex items-center justify-between gap-2 pt-1 border-t border-border-subtle">
+          <div class="text-[11px] text-on-surface flex items-center gap-1 font-semibold">
+            <span class="material-symbols-outlined text-[15px] text-primary">photo_camera</span>
+            <span>${state.shelfPhotoDataUrl ? 'Foto etalase terlampir' : 'Foto Etalase (opsional)'}</span>
+          </div>
+          <label
+            for="pwa-shelf-file-input"
+            class="btn btn-outline btn-sm cursor-pointer"
+          >
+            ${state.shelfPhotoDataUrl ? 'Ganti' : 'Ambil Foto'}
+          </label>
+          <input id="pwa-shelf-file-input" type="file" accept="image/*" capture="environment" class="hidden" />
+        </div>
+
+        ${state.shelfPhotoDataUrl ? `
+          <div class="rounded-lg overflow-hidden border border-border-subtle">
+            <img src="${state.shelfPhotoDataUrl}" alt="Foto Etalase" style="width:100%; height:76px; object-fit:cover; display:block;" />
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }
+
+  function renderFooterBar(currentOutlet, totalQuantity, totalAmount, overCredit) {
+    if (state.activeTab === 'outlet') {
+      return `
+        <div class="pwa-footer-bar">
+          <div class="min-w-0">
+            <span class="text-[10px] text-on-surface-variant uppercase tracking-wider block font-semibold">Keranjang</span>
+            <span class="font-bold text-xs text-on-surface">${totalQuantity > 0 ? totalQuantity + ' item · ' + window.ArbaUtils.formatRupiah(totalAmount) : 'Belum ada item'}</span>
+          </div>
+          <button
+            type="button"
+            class="btn btn-primary btn-pwa-goto-tab shrink-0"
+            data-tab="${totalQuantity > 0 ? 'nota' : 'produk'}"
+          >
+            <span>${totalQuantity > 0 ? 'Lanjut Nota' : 'Pilih Produk'}</span>
+            <span class="material-symbols-outlined text-[16px]">arrow_forward</span>
+          </button>
+        </div>
+      `;
+    }
+
+    if (state.activeTab === 'produk') {
+      return `
+        <div class="pwa-footer-bar">
+          <div>
+            <span class="text-[10px] text-on-surface-variant uppercase tracking-wider block font-semibold">${totalQuantity} Item</span>
+            <span class="font-bold text-sm font-mono text-primary">${window.ArbaUtils.formatRupiah(totalAmount)}</span>
+          </div>
+          <button
+            type="button"
+            class="btn btn-primary btn-pwa-goto-tab flex-1"
+            data-tab="nota"
+            ${totalQuantity === 0 ? 'disabled style="opacity:0.5; cursor:not-allowed;"' : ''}
+          >
+            <span>Lanjut Nota</span>
+            <span class="material-symbols-outlined text-[16px]">arrow_forward</span>
+          </button>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="pwa-footer-bar">
+        <div>
+          <span class="text-[10px] text-on-surface-variant uppercase tracking-wider block font-semibold">${totalQuantity} Item · ${window.ArbaUtils.escapeHtml(shortTerm(state.selectedTerm))}</span>
+          <span class="font-bold text-sm font-mono ${overCredit ? 'text-rose-700' : 'text-primary'}">
+            ${window.ArbaUtils.formatRupiah(totalAmount)}
+          </span>
+        </div>
+
+        <button
+          id="btn-pwa-checkout"
+          ${state.isSubmitting || totalQuantity === 0 ? 'disabled' : ''}
+          class="btn btn-primary flex-1 py-2.5"
+          style="${state.isSubmitting || totalQuantity === 0 ? 'opacity:0.5; cursor:not-allowed;' : ''}"
+          type="button"
+        >
+          <span class="material-symbols-outlined text-[16px]">send</span>
+          <span>${state.isSubmitting ? 'Menyimpan...' : 'Simpan Nota'}</span>
+        </button>
+      </div>
+    `;
+  }
+
+  function renderFieldSalesPwa(container) {
     var appState = window.ArbaStore.getState();
     var products = appState.products;
     var outlets = appState.outlets;
@@ -51,7 +521,6 @@
     var offlineQueue = appState.offlineQueue;
     var selectedOutletId = appState.selectedOutletId;
 
-    // Match initial outlet code from appState if not manually chosen
     if (selectedOutletId) {
       var matchOutlet = outlets.find(function (o) { return o.id === selectedOutletId || o.code === selectedOutletId; });
       if (matchOutlet && (!state.selectedOutletCode || state.selectedOutletCode === 'AP-SLO-001')) {
@@ -61,7 +530,6 @@
 
     var currentOutlet = outlets.find(function (o) { return o.code === state.selectedOutletCode; }) || outlets[0];
 
-    // Sales rep aktif & progres harian (dihitung live dari log kunjungan)
     var salesTeam = appState.salesTeam || [];
     var isFieldSalesRole = appState.currentUser && appState.currentUser.role === 'field-sales';
     var currentRep = isFieldSalesRole
@@ -72,15 +540,12 @@
     var repPerf = analytics.salesPerformance.find(function (s) { return s.name === currentRep; }) ||
       { visitsToday: 0, dailyVisitTarget: 0, ordersToday: 0, revenuePct: 0 };
 
-    // GPS check-in berlaku per outlet
     var isCheckedInHere = state.gpsCheckedIn && state.gpsOutletCode === currentOutlet.code;
 
-    // Riwayat order terakhir outlet (untuk fitur Repeat Order 1-tap)
     var lastOutletOrder = appState.orders.find(function (o) {
       return (o.outletId === currentOutlet.code || o.outletId === currentOutlet.id) && o.status !== 'REJECTED';
     });
 
-    // Filter products
     var filteredProducts = products.filter(function (prod) {
       var matchesCategory =
         state.activeCategory === 'all' ||
@@ -97,528 +562,95 @@
       return matchesCategory && matchesSearch;
     });
 
-    // Cart totals
-    var totalQuantity = Object.keys(state.cart).reduce(function (sum, sku) {
-      return sum + (state.cart[sku] || 0);
-    }, 0);
+    var cartItems = getCartItems(products);
+    var totalQuantity = cartItems.reduce(function (sum, item) { return sum + item.quantity; }, 0);
+    var totalAmount = cartItems.reduce(function (sum, item) { return sum + item.subtotal; }, 0);
 
-    var totalAmount = Object.keys(state.cart).reduce(function (sum, sku) {
-      var prod = products.find(function (p) { return p.sku === sku; });
-      var qty = state.cart[sku] || 0;
-      return sum + (prod ? prod.unitPrice * qty : 0);
-    }, 0);
-
-    // Validasi plafon kredit outlet (hanya untuk termin Jatuh Tempo non-Konsinyasi & non-COD)
     var isCreditTerm = /Net|Jatuh Tempo/i.test(state.selectedTerm);
     var overCredit = isCreditTerm && totalAmount > (currentOutlet.creditRemaining || 0);
 
+    var activeBodyHtml = '';
+    if (state.activeTab === 'outlet') {
+      activeBodyHtml = renderOutletTab(currentOutlet, outlets, isCheckedInHere);
+    } else if (state.activeTab === 'produk') {
+      activeBodyHtml = renderProdukTab(currentOutlet, filteredProducts);
+    } else {
+      activeBodyHtml = renderNotaTab(currentOutlet, cartItems, totalQuantity, overCredit);
+    }
+
     var html = `
-      <div class="flex flex-col items-center w-full pb-12">
-        <!-- Viewport Control Bar (Disesuaikan dengan Role Sales vs Direksi/Admin) -->
-        <div class="w-full max-w-xl flex items-center justify-between mb-4 bg-surface-container-lowest p-3 rounded-xl border border-border-subtle/50 text-xs text-on-surface-variant">
-          <div class="flex items-center gap-2">
-            <span class="material-symbols-outlined text-primary text-[18px]">smartphone</span>
-            <span class="font-semibold text-on-surface">${isFieldSalesRole ? 'Aplikasi Kerja Harian Sales: ' + currentRep : 'Mode Pantau &amp; Simulasi Aplikasi HP Sales'}</span>
-            <span class="hidden sm:inline">· ${isFieldSalesRole ? 'Bisa Tanpa Sinyal' : 'Pilih Nama Sales di Layar HP'}</span>
-          </div>
-          <div class="flex items-center gap-1.5">
-            <button
-              id="btn-viewport-phone"
-              class="px-2.5 py-1 rounded-md font-medium cursor-pointer transition-colors border-0 text-xs ${
-                state.isPhoneFrame
-                  ? 'bg-primary text-white font-semibold'
-                  : 'bg-surface-container hover:bg-surface-container-high text-on-surface'
-              }"
-              type="button"
-            >
-              Ukuran HP (390px)
-            </button>
-            <button
-              id="btn-viewport-full"
-              class="px-2.5 py-1 rounded-md font-medium cursor-pointer transition-colors border-0 text-xs ${
-                !state.isPhoneFrame
-                  ? 'bg-primary text-white font-semibold'
-                  : 'bg-surface-container hover:bg-surface-container-high text-on-surface'
-              }"
-              type="button"
-            >
-              Layar Lebar
-            </button>
-          </div>
-        </div>
-
-        <!-- Smartphone Body Simulation Container -->
+      <div class="flex flex-col items-center w-full pb-4">
         <div
-          class="w-full transition-all duration-200 ${
-            state.isPhoneFrame
-              ? 'max-w-[420px] rounded-3xl border border-border-subtle/70 bg-surface shadow-xl overflow-hidden'
-              : 'max-w-2xl bg-surface rounded-2xl border border-border-subtle/60 p-4'
-          }"
-          style="${state.isPhoneFrame ? 'max-width: 420px; border-radius: 28px;' : ''}"
+          class="w-full transition-all duration-200 max-w-[420px] rounded-3xl border border-border-subtle/70 bg-surface shadow-xl overflow-hidden"
+          style="max-width: 420px; border-radius: 28px;"
         >
-          <!-- Smartphone App Frame -->
-          <div class="flex flex-col min-h-[680px] bg-white text-slate-900 relative rounded-2xl overflow-hidden" style="position:relative; background:#fff; min-height:680px;">
-            <!-- Top Bar - Sales Profile & Offline Switch -->
-            <div class="bg-[#005c55] text-white px-4 py-3 sticky top-0 z-30 shadow-xs flex items-center justify-between" style="background:#005c55; color:#fff;">
-              <div class="flex items-center gap-2.5">
-                <div class="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center font-bold text-xs text-white" style="width:32px; height:32px; border-radius:50%; background:rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:center;">
-                  ${repInitials}
-                </div>
-                <div class="flex flex-col">
-                  ${isFieldSalesRole ? `
-                    <span class="font-bold text-xs leading-tight text-white">${currentRep}</span>
-                    <span class="text-[11px] text-teal-100 font-medium">${appState.currentUser.division || 'Sales Rep'} · Terkunci</span>
-                  ` : `
-                    <select
-                      id="pwa-rep-select"
-                      aria-label="Pilih akun sales"
-                      class="font-bold text-xs leading-tight cursor-pointer border-0"
-                      style="background:transparent; color:#fff; padding:0; max-width:150px;"
-                    >
-                      ${salesTeam.map(function (s) {
-                        return `<option value="${s.name}" style="color:#0f172a;" ${s.name === currentRep ? 'selected' : ''}>${s.name}</option>`;
-                      }).join('')}
-                    </select>
-                    <span class="text-[11px] text-teal-100 font-medium">Sales Rep · Solo Raya</span>
-                  `}
-                </div>
-              </div>
+          <div class="pwa-frame">
+            ${renderTopBar(appState, isFieldSalesRole, currentRep, repInitials, salesTeam, isOnline, offlineQueue)}
 
-              <!-- Offline/Online Network Indicator Button -->
-              <button
-                id="btn-pwa-online-toggle"
-                title="Klik untuk simulasi mode Online/Offline"
-                class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-colors border-0 ${
-                  isOnline
-                    ? 'bg-white/15 text-white hover:bg-white/25'
-                    : 'bg-amber-400 text-slate-950 font-bold'
-                }"
-                style="${isOnline ? 'background:rgba(255,255,255,0.18); color:#fff;' : 'background:#fbbf24; color:#0f172a;'}"
-                type="button"
-              >
-                <span
-                  class="w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-300' : 'bg-amber-950'}"
-                  style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${isOnline ? '#6ee7b7' : '#451a03'};"
-                ></span>
-                <span>${isOnline ? 'Online' : 'Offline'}</span>
-                ${!isOnline && offlineQueue.length > 0 ? `
-                  <span class="ml-1 px-1 bg-amber-900 text-amber-200 text-[10px] rounded">
-                    ${offlineQueue.length}
-                  </span>
-                ` : ''}
-              </button>
-            </div>
-
-            <!-- Daily Target Progress Strip (live dari log kunjungan) -->
-            <div class="px-4 py-2 flex items-center justify-between text-[11px]" style="background:#e6f4f2; color:#004d47; padding:0.45rem 1rem; border-bottom:1px solid #cce7e3;">
+            <div class="pwa-progress-strip">
               <span class="flex items-center gap-1">
                 <span class="material-symbols-outlined text-[14px]">directions_walk</span>
-                Kunjungan hari ini: <b>${repPerf.visitsToday}/${repPerf.dailyVisitTarget}</b>
+                Kunjungan <b>${repPerf.visitsToday}/${repPerf.dailyVisitTarget}</b>
               </span>
-              <span>Order: <b>${repPerf.ordersToday}</b></span>
-              <span>Omset: <b>${repPerf.revenuePct}%</b> target</span>
+              <span>Order <b>${repPerf.ordersToday}</b></span>
+              <span>Target <b>${repPerf.revenuePct}%</b></span>
             </div>
 
             ${(!isOnline || offlineQueue.length > 0) ? `
-              <!-- Offline-First Storage & Queue Status Banner -->
-              <div class="px-3.5 py-2.5 text-xs" style="background:#fffbeb; border-bottom:1px solid #fde68a; color:#78350f; padding:0.6rem 0.9rem;">
-                <div class="flex items-center justify-between gap-2">
-                  <div class="flex items-center gap-1.5 font-bold text-[11px]" style="color:#92400e;">
-                    <span class="material-symbols-outlined text-[16px]">cloud_off</span>
-                    <span>Mode Offline-First (Disimpan di IndexedDB Lokal)</span>
-                  </div>
-                  <button
-                    type="button"
-                    id="btn-pwa-sync-now"
-                    class="px-2.5 py-1 rounded-md text-[10px] font-bold cursor-pointer border-0"
-                    style="background:#005c55; color:#fff; border-radius:6px; padding:0.25rem 0.6rem;"
-                  >
-                    Kirim ke Pusat (${offlineQueue.length})
-                  </button>
+              <div class="px-3.5 py-2 flex items-center justify-between gap-2 bg-amber-50 border-b border-amber-200 text-amber-900 text-[11px] shrink-0">
+                <div class="flex items-center gap-1.5 font-bold">
+                  <span class="material-symbols-outlined text-[15px]">cloud_off</span>
+                  <span>${offlineQueue.length > 0 ? offlineQueue.length + ' antrean sync' : 'Mode Offline'}</span>
                 </div>
-                ${offlineQueue.length > 0 ? `
-                  <div class="mt-1.5 text-[10px] space-y-0.5" style="color:#92400e;">
-                    <div><b>${offlineQueue.length} transaksi</b> tersimpan aman di memori HP &amp; siap dikirim saat online:</div>
-                    ${offlineQueue.slice(0, 3).map(function (q) {
-                      return `<div class="truncate">• ${window.ArbaUtils.escapeHtml(q.summary || ('Order #' + q.id))}</div>`;
-                    }).join('')}
-                  </div>
-                ` : `
-                  <div class="mt-1 text-[10px]" style="color:#92400e;">
-                    Input order &amp; kunjungan tetap berjalan tanpa sinyal. Data otomatis dikirim ke pusat saat online kembali.
-                  </div>
-                `}
+                <button
+                  type="button"
+                  id="btn-pwa-sync-now"
+                  class="btn btn-primary btn-sm"
+                >
+                  Sinkron (${offlineQueue.length})
+                </button>
               </div>
             ` : ''}
 
-            <!-- Main App Body -->
-            <div class="flex-1 p-3.5 space-y-3 pb-24 overflow-y-auto" style="padding: 0.875rem; padding-bottom: 6rem; overflow-y:auto; max-height:580px;">
-              <!-- Step 1: Outdoor GPS Check-In & Outlet Card -->
-              <div class="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-2.5 mb-3" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:0.75rem;">
-                <div class="flex items-center justify-between mb-2">
-                  <label class="text-[11px] uppercase tracking-wider font-bold text-slate-600">
-                    Target Outlet Mitra
-                  </label>
-                  <!-- 1-Tap GPS Geofence Check-in Button -->
-                  <button
-                    type="button"
-                    id="btn-gps-checkin"
-                    class="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold cursor-pointer transition-colors border-0 ${
-                      isCheckedInHere
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : 'bg-amber-100 text-amber-900'
-                    }"
-                    style="background:${isCheckedInHere ? '#d1fae5' : '#fef3c7'}; color:${isCheckedInHere ? '#065f46' : '#92400e'};"
-                  >
-                    <span class="material-symbols-outlined text-[14px]">
-                      ${isCheckedInHere ? 'pin_drop' : 'location_searching'}
-                    </span>
-                    <span>${isCheckedInHere ? `GPS Valid (${state.gpsDistance}m)` : 'Check-in Lokasi'}</span>
-                  </button>
-                </div>
-
-                <!-- Outlet Selector Dropdown -->
-                <select
-                  id="pwa-outlet-select"
-                  aria-label="Pilih Outlet Mitra"
-                  class="w-full bg-white p-2.5 rounded-lg text-xs font-semibold text-slate-900 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-[#005c55] cursor-pointer mb-2"
-                  style="border:1px solid #e2e8f0; width:100%;"
-                >
-                  ${outlets.map(function (o) {
-                    return `
-                      <option value="${o.code}" ${o.code === state.selectedOutletCode ? 'selected' : ''}>
-                        ${o.name} (${o.cityName})
-                      </option>
-                    `;
-                  }).join('')}
-                </select>
-
-                <!-- Outlet Metadata & Status Konsinyasi (Apotek Pasif >90% Titip Jual) -->
-                <div class="flex items-center justify-between text-xs text-slate-600 pt-1 border-t border-slate-200/60" style="border-top:1px solid #e2e8f0; padding-top:0.35rem;">
-                  <div class="truncate max-w-[200px]">
-                    <span>PIC: <b>${currentOutlet.picName}</b></span>
-                    <span class="text-slate-400 mx-1">·</span>
-                    <span class="text-[11px] font-semibold text-teal-800">${currentOutlet.terms}</span>
-                  </div>
-                  <div class="text-right">
-                    <span class="text-[10px] text-slate-500 block">Tagihan Barang Laku</span>
-                    <span class="font-bold text-emerald-700 text-xs">
-                      ${window.ArbaUtils.formatRupiah(currentOutlet.consignmentBillableAmount || 0)}
-                    </span>
-                  </div>
-                </div>
-
-                <!-- Ringkasan Stok Titipan di Apotek Ini & Alarm Pink Expired -->
-                ${(currentOutlet.consignmentItems && currentOutlet.consignmentItems.length > 0) ? `
-                  <div class="p-2 rounded-lg text-[11px] space-y-1" style="background:#fdf2f8; border:1px solid #f472b6; color:#831843; margin-top:0.35rem;">
-                    <div class="font-bold flex items-center justify-between">
-                      <span>📦 Stok Titipan di Apotek: ${currentOutlet.consignmentTotalUnits || 0} unit</span>
-                      <span>Laku: ${currentOutlet.consignmentItems.reduce(function (s, c) { return s + c.soldQty; }, 0)} unit</span>
-                    </div>
-                    ${currentOutlet.consignmentItems.filter(function (c) { return c.nearExpiry; }).map(function (c) {
-                      return `<div class="text-[10px] font-semibold" style="color:#be185d;">🩷 Alarm Pink: <b>${c.name}</b> (${c.remainingQty} btl, ED ${c.expiry}) — Minta apotek jual dulu!</div>`;
-                    }).join('')}
-                  </div>
-                ` : ''}
-
-                <!-- Quick Actions: Tagih & Isi Ulang Konsinyasi (1-Tap), Rute TSP & Kunjungan Tanpa Order -->
-                <div class="flex flex-wrap gap-1.5" style="display:flex; flex-wrap:wrap; gap:0.35rem; margin-top:0.5rem;">
-                  <button
-                    type="button"
-                    id="btn-pwa-repeat-order"
-                    class="flex-1 flex items-center justify-center gap-1 py-2 rounded-lg text-[11px] font-semibold cursor-pointer border-0"
-                    style="flex:1; background:#e0f2fe; color:#075985; border-radius:8px; padding:0.45rem;"
-                    title="Otomatis isi jumlah barang konsinyasi yang laku terjual di apotek ini untuk ditagih & diganti stok baru"
-                  >
-                    <span class="material-symbols-outlined text-[15px]">sync_saved_locally</span>
-                    <span>Tagih &amp; Isi Ulang</span>
-                  </button>
-                  <button
-                    type="button"
-                    id="btn-pwa-tsp-route"
-                    class="flex items-center justify-center gap-1 py-2 px-2.5 rounded-lg text-[11px] font-bold cursor-pointer border-0"
-                    style="background:#d1fae5; color:#065f46; border-radius:8px; padding:0.45rem 0.6rem;"
-                    title="Lihat Peta Lokasi Apotek & Urutan Rute Kunjungan Terdekat (Hemat BBM)"
-                  >
-                    <span class="material-symbols-outlined text-[15px]">route</span>
-                    <span>Rute Terdekat</span>
-                  </button>
-                  <button
-                    type="button"
-                    id="btn-pwa-visit-only"
-                    class="flex items-center justify-center gap-1 py-2 px-2.5 rounded-lg text-[11px] font-semibold cursor-pointer border-0"
-                    style="background:#f1f5f9; color:#334155; border-radius:8px; padding:0.45rem 0.6rem;"
-                  >
-                    <span class="material-symbols-outlined text-[15px]">where_to_vote</span>
-                    <span>Kunjungan Saja</span>
-                  </button>
-                </div>
-              </div>
-
-              <!-- Step 2: Simplified Product Order Catalog -->
-              <div class="space-y-2 mb-3">
-                <div class="flex items-center justify-between mb-1.5">
-                  <span class="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                    2. Pilih Barang / Scan Kemasan
-                  </span>
-                  <div class="flex items-center gap-2">
-                    <button
-                      type="button"
-                      id="btn-pwa-scan-qr"
-                      class="px-2 py-1 rounded-md text-[11px] font-bold flex items-center gap-1 cursor-pointer border-0"
-                      style="background:#005c55; color:#ffffff;"
-                      title="Scan QR pada Botol/Karton Herbal untuk Masukkan ke Nota"
-                    >
-                      <span class="material-symbols-outlined text-[14px]">qr_code_scanner</span>
-                      <span>Scan QR Botol</span>
-                    </button>
-                    <span class="text-[11px] text-teal-800 font-semibold" style="color:#005c55;">
-                      ${totalQuantity} botol
-                    </span>
-                  </div>
-                </div>
-
-                <!-- Quick Category Filter Bar -->
-                <div class="flex items-center gap-1 overflow-x-auto pb-1 text-xs mb-2">
-                  ${[
-                    { id: 'all', label: 'Semua' },
-                    { id: 'madu', label: 'Madu' },
-                    { id: 'kapsul', label: 'Kapsul' },
-                    { id: 'minyak', label: 'Minyak' },
-                    { id: 'kosmetik', label: 'Kosmetik' }
-                  ].map(function (cat) {
-                    var isCatActive = state.activeCategory === cat.id;
-                    return `
-                      <button
-                        class="btn-pwa-cat px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer transition-colors whitespace-nowrap border-0 ${
-                          isCatActive
-                            ? 'bg-slate-900 text-white font-semibold'
-                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                        }"
-                        style="${isCatActive ? 'background:#0f172a; color:#fff;' : 'background:#f1f5f9; color:#475569;'}"
-                        data-cat="${cat.id}"
-                        type="button"
-                      >
-                        ${cat.label}
-                      </button>
-                    `;
-                  }).join('')}
-                </div>
-
-                <!-- Quick Search -->
-                <div class="relative mb-2" style="position:relative;">
-                  <span class="material-symbols-outlined text-slate-400 absolute left-2.5 top-2 text-[16px] pointer-events-none" style="position:absolute; left:0.6rem; top:0.5rem; color:#94a3b8;">
-                    search
-                  </span>
-                  <input
-                    id="pwa-search-input"
-                    type="text"
-                    placeholder="Cari nama produk / SKU..."
-                    value="${window.ArbaUtils.escapeHtml(state.productSearch)}"
-                    class="w-full pl-8 pr-3 py-1.5 bg-slate-100 rounded-lg text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none border-0"
-                    style="background:#f1f5f9; padding-left:2rem; width:100%; border-radius:8px;"
-                  />
-                </div>
-
-                <!-- Product List with Big Touch Steppers -->
-                <div class="space-y-2 max-h-[300px] overflow-y-auto pr-0.5" style="max-height:260px; overflow-y:auto;">
-                  ${filteredProducts.map(function (prod) {
-                    var qty = state.cart[prod.sku] || 0;
-                    var isLow = prod.stock <= prod.rop;
-                    var atMax = qty >= prod.stock;
-                    var consItem = (currentOutlet.consignmentItems || []).find(function (c) { return c.sku === prod.sku; });
-
-                    return `
-                      <div
-                        class="p-2.5 rounded-xl border transition-colors flex items-center justify-between gap-2.5 mb-2 ${
-                          qty > 0
-                            ? 'bg-teal-50/50 border-teal-200'
-                            : 'bg-white border-slate-200'
-                        }"
-                        style="border: 1px solid ${qty > 0 ? '#99f6e4' : '#e2e8f0'}; background:${qty > 0 ? '#f0fdfa' : '#fff'}; border-radius:12px; padding:0.65rem;"
-                      >
-                        <div class="min-w-0 flex-1">
-                          <div class="font-semibold text-xs text-slate-900 truncate">
-                            ${prod.name}
-                          </div>
-                          <div class="flex items-center gap-1.5 text-[11px] text-slate-500 mt-0.5">
-                            <span class="font-mono font-semibold text-slate-800">
-                              ${window.ArbaUtils.formatRupiah(prod.unitPrice)}
-                            </span>
-                            <span>·</span>
-                            <span class="font-mono text-slate-500">Gudang: ${prod.stock}</span>
-                          </div>
-                          ${consItem ? `
-                            <div class="text-[10px] font-semibold mt-0.5" style="color:${consItem.nearExpiry ? '#be185d' : '#0f766e'};">
-                              Di Apotek: Titip ${consItem.consignedQty} · Laku <b>${consItem.soldQty}</b> · Sisa ${consItem.remainingQty}${consItem.nearExpiry ? ' · 🩷 Hampir ED!' : ''}
-                            </div>
-                          ` : ''}
-                          ${prod.stock === 0 ? `
-                            <div class="text-[10px] font-semibold mt-0.5" style="color:#be123c;">
-                              Stok gudang habis — tidak dapat dipesan
-                            </div>
-                          ` : isLow ? `
-                            <div class="text-[10px] font-semibold mt-0.5" style="color:#ea580c;">
-                              🟧 Alarm Oranye: Stok Gudang &le; ROP (${prod.rop})${atMax && qty > 0 ? ' · batas stok' : ''}
-                            </div>
-                          ` : (atMax && qty > 0 ? `
-                            <div class="text-[10px] text-amber-700 font-medium mt-0.5">Batas stok gudang tercapai</div>
-                          ` : '')}
-                        </div>
-
-                        <!-- Touch-Friendly Steppers (>= 44px hit area) -->
-                        <div class="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5 shrink-0" style="background:#f1f5f9; border-radius:8px; padding:2px;">
-                          <button
-                            type="button"
-                            class="btn-stepper-minus w-10 h-10 rounded-md bg-white text-slate-700 flex items-center justify-center font-bold text-base shadow-2xs hover:bg-slate-200 active:scale-95 disabled:opacity-30 cursor-pointer border-0"
-                            style="width:36px; height:36px; background:#fff; border-radius:6px; cursor:pointer;"
-                            data-sku="${prod.sku}"
-                            ${qty === 0 ? 'disabled' : ''}
-                          >
-                            -
-                          </button>
-                          <span class="w-8 text-center font-bold text-xs font-mono text-slate-900" style="width:28px; text-align:center;">
-                            ${qty}
-                          </span>
-                          <button
-                            type="button"
-                            class="btn-stepper-plus w-10 h-10 rounded-md bg-[#005c55] text-white flex items-center justify-center font-bold text-base shadow-2xs hover:bg-teal-800 active:scale-95 cursor-pointer border-0"
-                            style="width:36px; height:36px; background:#005c55; color:#fff; border-radius:6px; cursor:pointer;"
-                            data-sku="${prod.sku}"
-                            ${atMax ? 'disabled' : ''}
-                          >
-                            +
-                          </button>
-                        </div>
-                      </div>
-                    `;
-                  }).join('')}
-                </div>
-              </div>
-
-              <!-- Step 3: Payment Terms, E-Signature Apoteker & Bukti Foto Etalase Offline -->
-              <div class="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-2.5 mb-2" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:0.75rem;">
-                <div class="flex items-center justify-between text-xs mb-1">
-                  <span class="font-semibold text-slate-700">Skema Nota:</span>
-                  <select
-                    id="pwa-term-select"
-                    class="bg-white px-2.5 py-1 rounded-md text-xs font-semibold text-slate-800 border border-slate-200 cursor-pointer focus:outline-none"
-                    style="border:1px solid #cbd5e1;"
-                  >
-                    <option value="Konsinyasi (Titip Jual)" ${state.selectedTerm === 'Konsinyasi (Titip Jual)' ? 'selected' : ''}>Konsinyasi / Titip Jual (&gt;90%)</option>
-                    <option value="Jatuh Tempo (Net 14 Hari)" ${state.selectedTerm === 'Jatuh Tempo (Net 14 Hari)' ? 'selected' : ''}>Jatuh Tempo (Net 14 Hari)</option>
-                    <option value="Cash / Tunai di Awal" ${state.selectedTerm === 'Cash / Tunai di Awal' ? 'selected' : ''}>Cash / Tunai di Awal</option>
-                  </select>
-                </div>
-                <input
-                  id="pwa-notes-input"
-                  type="text"
-                  value="${window.ArbaUtils.escapeHtml(state.orderNotes)}"
-                  placeholder="Catatan tambahan apoteker (opsional)..."
-                  class="w-full bg-white px-2.5 py-1.5 rounded-lg text-xs text-slate-800 border border-slate-200 placeholder:text-slate-400 focus:outline-none"
-                  style="border:1px solid #cbd5e1; width:100%; border-radius:8px;"
-                />
-
-                <!-- Pad Tanda Tangan Digital Apoteker (HTML5 Canvas E-Signature) -->
-                <div class="pt-1 border-t border-slate-200">
-                  <div class="flex items-center justify-between mb-1">
-                    <span class="text-[11px] font-bold text-slate-700 flex items-center gap-1">
-                      <span class="material-symbols-outlined text-[14px] text-teal-700">draw</span>
-                      Tanda Tangan Apoteker (${currentOutlet.picName || 'PIC Outlet'})
-                    </span>
-                    <div class="flex items-center gap-1">
-                      <button
-                        type="button"
-                        id="btn-pwa-auto-sign"
-                        class="px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer border-0"
-                        style="background:#e0f2fe; color:#0369a1;"
-                        title="Buat tanda tangan digital apoteker otomatis"
-                      >
-                        TTD Cepat
-                      </button>
-                      <button
-                        type="button"
-                        id="btn-pwa-clear-sign"
-                        class="px-2 py-0.5 rounded text-[10px] font-semibold cursor-pointer border-0"
-                        style="background:#f1f5f9; color:#475569;"
-                      >
-                        Hapus
-                      </button>
-                    </div>
-                  </div>
-                  <div style="background:#ffffff; border:1px dashed #94a3b8; border-radius:8px; overflow:hidden; position:relative;">
-                    <canvas id="pwa-signature-canvas" width="320" height="76" style="width:100%; height:76px; display:block; touch-action:none; cursor:crosshair;"></canvas>
-                    ${state.signatureDataUrl ? `
-                      <span style="position:absolute; right:6px; bottom:4px; font-size:9px; font-weight:700; color:#059669; background:#ecfdf5; padding:1px 5px; border-radius:4px;">✓ TTD Tersimpan</span>
-                    ` : `
-                      <span id="pwa-sign-hint" style="position:absolute; left:8px; bottom:4px; font-size:9px; color:#94a3b8; pointer-events:none;">Goreskan tanda tangan di sini...</span>
-                    `}
-                  </div>
-                </div>
-
-                <!-- Bukti Foto Etalase Rak Herbal Offline-Ready -->
-                <div class="pt-1 border-t border-slate-200 flex items-center justify-between gap-2">
-                  <div class="text-[11px] text-slate-700">
-                    <div class="font-bold flex items-center gap-1">
-                      <span class="material-symbols-outlined text-[14px] text-teal-700">photo_camera</span>
-                      Bukti Foto Etalase Rak
-                    </div>
-                    <div class="text-[10px] text-slate-500">
-                      ${state.shelfPhotoDataUrl ? '✓ Foto etalase siap disinkronkan' : 'Opsional — disimpan lokal saat offline'}
-                    </div>
-                  </div>
-                  <div class="flex items-center gap-1.5">
-                    <label
-                      for="pwa-shelf-file-input"
-                      class="px-2.5 py-1 rounded-md text-[10px] font-bold cursor-pointer"
-                      style="background:#f1f5f9; color:#334155; border:1px solid #cbd5e1;"
-                    >
-                      Pilih File
-                    </label>
-                    <input id="pwa-shelf-file-input" type="file" accept="image/*" capture="environment" style="display:none;" />
-                    <button
-                      type="button"
-                      id="btn-pwa-capture-shelf"
-                      class="px-2.5 py-1 rounded-md text-[10px] font-bold cursor-pointer border-0"
-                      style="background:#005c55; color:#ffffff;"
-                    >
-                      ${state.shelfPhotoDataUrl ? 'Ganti Foto' : 'Ambil Foto Audit'}
-                    </button>
-                  </div>
-                </div>
-                ${state.shelfPhotoDataUrl ? `
-                  <div class="mt-1 rounded-lg overflow-hidden border border-slate-300">
-                    <img src="${state.shelfPhotoDataUrl}" alt="Bukti Foto Etalase" style="width:100%; height:72px; object-fit:cover; display:block;" />
-                  </div>
-                ` : ''}
-              </div>
-            </div>
-
-            <!-- Sticky Bottom Action Bar - Mobile Friendly -->
-            <div class="absolute bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-3.5 py-2.5 shadow-lg flex items-center justify-between gap-3 z-20" style="position:absolute; bottom:0; left:0; right:0; background:#fff; border-top:1px solid #e2e8f0; padding:0.65rem 0.85rem; z-index:20;">
-              <div>
-                <span class="text-[10px] text-slate-500 uppercase tracking-wider block font-medium">
-                  Total ${totalQuantity} Item
-                </span>
-                <span class="font-bold text-sm text-[#005c55]" style="color:${overCredit ? '#be123c' : '#005c55'};">
-                  ${window.ArbaUtils.formatRupiah(totalAmount)}
-                </span>
-                ${overCredit ? `
-                  <span class="text-[10px] font-semibold block" style="color:#be123c;">Melebihi sisa plafon</span>
-                ` : ''}
-              </div>
-
+            <div class="pwa-tabbar" role="tablist">
               <button
-                id="btn-pwa-checkout"
-                ${state.isSubmitting || totalQuantity === 0 ? 'disabled' : ''}
-                class="flex-1 py-3 px-4 rounded-xl bg-[#005c55] hover:bg-teal-800 text-white font-bold text-xs shadow-md active:scale-95 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5 transition-colors border-0"
-                style="background:#005c55; color:#fff; border-radius:12px; padding:0.75rem 1rem; cursor:pointer;"
                 type="button"
+                role="tab"
+                aria-selected="${state.activeTab === 'outlet'}"
+                class="pwa-tab ${state.activeTab === 'outlet' ? 'active' : ''}"
+                data-tab="outlet"
               >
-                <span class="material-symbols-outlined text-[16px]">send</span>
-                <span>${state.isSubmitting ? 'Mengirim...' : 'Simpan Tagihan &amp; Ganti Nota Baru'}</span>
+                <span class="material-symbols-outlined text-[16px]">storefront</span>
+                <span>Outlet</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected="${state.activeTab === 'produk'}"
+                class="pwa-tab ${state.activeTab === 'produk' ? 'active' : ''}"
+                data-tab="produk"
+              >
+                <span class="material-symbols-outlined text-[16px]">inventory_2</span>
+                <span>Produk</span>
+                ${totalQuantity > 0 ? `<span class="pwa-tab-badge">${totalQuantity}</span>` : ''}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected="${state.activeTab === 'nota'}"
+                class="pwa-tab ${state.activeTab === 'nota' ? 'active' : ''}"
+                data-tab="nota"
+              >
+                <span class="material-symbols-outlined text-[16px]">receipt_long</span>
+                <span>Nota</span>
               </button>
             </div>
+
+            <div class="pwa-body">
+              ${activeBodyHtml}
+            </div>
+
+            ${renderFooterBar(currentOutlet, totalQuantity, totalAmount, overCredit)}
           </div>
         </div>
       </div>
@@ -636,6 +668,16 @@
   function bindEvents(container, currentOutlet, products, totalAmount, ctx) {
     ctx = ctx || {};
 
+    // Tabs & tab jump buttons
+    container.querySelectorAll('.pwa-tab, .btn-pwa-goto-tab').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var nextTab = btn.getAttribute('data-tab');
+        if (!nextTab) return;
+        state.activeTab = nextTab;
+        renderFieldSalesPwa(container);
+      });
+    });
+
     // Sales rep account switch
     var repSelect = container.querySelector('#pwa-rep-select');
     if (repSelect) {
@@ -646,7 +688,7 @@
       });
     }
 
-    // Tagih Laku & Isi Ulang Konsinyasi (1-tap)
+    // Tagih Laku & Isi Ulang Konsinyasi (1-tap -> langsung ke Produk)
     var btnRepeat = container.querySelector('#btn-pwa-repeat-order');
     if (btnRepeat) {
       btnRepeat.addEventListener('click', function () {
@@ -666,12 +708,13 @@
           });
         }
         state.cart = newCart;
-        window.ArbaApp.showToast('Keranjang diisi sesuai barang konsinyasi yang terjual di ' + currentOutlet.name, 'sync_saved_locally');
+        state.activeTab = 'produk';
+        window.ArbaApp.showToast('Keranjang diisi sesuai barang laku di ' + currentOutlet.name, 'sync_saved_locally');
         renderFieldSalesPwa(container);
       });
     }
 
-    // Visit-only (canvassing) log
+    // Visit-only log
     var btnVisitOnly = container.querySelector('#btn-pwa-visit-only');
     if (btnVisitOnly) {
       btnVisitOnly.addEventListener('click', function () {
@@ -679,7 +722,7 @@
       });
     }
 
-    // Optimasi Rute TSP button
+    // Route optimizer
     var btnTspRoute = container.querySelector('#btn-pwa-tsp-route');
     if (btnTspRoute && window.ArbaAdvanced) {
       btnTspRoute.addEventListener('click', function () {
@@ -702,10 +745,20 @@
             if (state.scannedQrBatches.indexOf(scannedProd.activeBatch) === -1) {
               state.scannedQrBatches.push(scannedProd.activeBatch);
             }
-            window.ArbaApp.showToast('QR Batch ' + scannedProd.activeBatch + ' diverifikasi & +2 ' + scannedProd.name + ' masuk keranjang!', 'qr_code_scanner');
+            window.ArbaApp.showToast('QR ' + scannedProd.activeBatch + ' (+2 ' + scannedProd.name + ')', 'qr_code_scanner');
             renderFieldSalesPwa(container);
           }
         });
+      });
+    }
+
+    // Reset filter on empty search
+    var btnResetFilter = container.querySelector('#btn-pwa-reset-filter');
+    if (btnResetFilter) {
+      btnResetFilter.addEventListener('click', function () {
+        state.activeCategory = 'all';
+        state.productSearch = '';
+        renderFieldSalesPwa(container);
       });
     }
 
@@ -763,26 +816,6 @@
       sigCanvas.addEventListener('touchmove', moveDraw, { passive: false });
       sigCanvas.addEventListener('touchend', endDraw);
 
-      var btnAutoSign = container.querySelector('#btn-pwa-auto-sign');
-      if (btnAutoSign) {
-        btnAutoSign.addEventListener('click', function () {
-          sigCtx.clearRect(0, 0, sigCanvas.width, sigCanvas.height);
-          sigCtx.strokeStyle = '#005c55';
-          sigCtx.lineWidth = 2.2;
-          sigCtx.beginPath();
-          sigCtx.moveTo(35, 52);
-          sigCtx.bezierCurveTo(65, 16, 95, 64, 130, 28);
-          sigCtx.bezierCurveTo(155, 12, 175, 55, 220, 35);
-          sigCtx.lineTo(275, 42);
-          sigCtx.stroke();
-          sigCtx.fillStyle = '#0f172a';
-          sigCtx.font = 'bold 10px sans-serif';
-          sigCtx.fillText((currentOutlet.picName || 'Apoteker APA') + ' • Terverifikasi', 35, 68);
-          state.signatureDataUrl = sigCanvas.toDataURL('image/png');
-          renderFieldSalesPwa(container);
-        });
-      }
-
       var btnClearSign = container.querySelector('#btn-pwa-clear-sign');
       if (btnClearSign) {
         btnClearSign.addEventListener('click', function () {
@@ -793,16 +826,6 @@
       }
     }
 
-    // Bukti Foto Etalase Rak Herbal
-    var btnCaptureShelf = container.querySelector('#btn-pwa-capture-shelf');
-    if (btnCaptureShelf && window.ArbaAdvanced) {
-      btnCaptureShelf.addEventListener('click', function () {
-        state.shelfPhotoDataUrl = window.ArbaAdvanced.generateSampleShelfPhotoDataUrl(currentOutlet.name, ctx.currentRep);
-        window.ArbaApp.showToast('Bukti foto etalase rak berhasil direkam untuk ' + currentOutlet.name, 'photo_camera');
-        renderFieldSalesPwa(container);
-      });
-    }
-
     var shelfFileInput = container.querySelector('#pwa-shelf-file-input');
     if (shelfFileInput) {
       shelfFileInput.addEventListener('change', function (e) {
@@ -811,26 +834,20 @@
         var reader = new FileReader();
         reader.onload = function (ev) {
           state.shelfPhotoDataUrl = ev.target.result;
-          window.ArbaApp.showToast('Foto etalase berhasil diunggah', 'photo_camera');
+          window.ArbaApp.showToast('Foto etalase terlampir', 'photo_camera');
           renderFieldSalesPwa(container);
         };
         reader.readAsDataURL(file);
       });
     }
-    // Viewport Toggle
-    var btnPhone = container.querySelector('#btn-viewport-phone');
-    var btnFull = container.querySelector('#btn-viewport-full');
 
-    if (btnPhone) {
-      btnPhone.addEventListener('click', function () {
-        state.isPhoneFrame = true;
-        renderFieldSalesPwa(container);
-      });
-    }
-    if (btnFull) {
-      btnFull.addEventListener('click', function () {
-        state.isPhoneFrame = false;
-        renderFieldSalesPwa(container);
+    // Logout
+    var btnPwaLogout = container.querySelector('#btn-pwa-logout');
+    if (btnPwaLogout) {
+      btnPwaLogout.addEventListener('click', function () {
+        if (window.ArbaStore && typeof window.ArbaStore.logoutUser === 'function') {
+          window.ArbaStore.logoutUser();
+        }
       });
     }
 
@@ -842,7 +859,7 @@
       });
     }
 
-    // Sync Now button inside Offline Banner
+    // Sync Now button
     var btnSyncNow = container.querySelector('#btn-pwa-sync-now');
     if (btnSyncNow) {
       btnSyncNow.addEventListener('click', function () {
@@ -850,18 +867,24 @@
       });
     }
 
-    // 1-Tap GPS Check-in (mendukung Geolocation API asli + fallback simulasi presisi)
+    // GPS Check-in
     var btnGps = container.querySelector('#btn-gps-checkin');
     if (btnGps) {
       btnGps.addEventListener('click', function () {
-        var finishCheckin = function (dist, coordsText) {
+        var finishCheckin = function (dist, coordsText, sourceLabel) {
           var now = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
           state.gpsDistance = dist;
           state.gpsCoords = coordsText;
+          state.gpsSource = sourceLabel;
           state.gpsCheckedIn = true;
           state.gpsOutletCode = currentOutlet.code;
           state.checkinTime = now + ' WIB';
-          window.ArbaApp.showToast(`GPS Check-in: ${dist}m dari ${currentOutlet.name} (${now} WIB)`, 'pin_drop');
+          window.ArbaApp.showToast(
+            dist !== null
+              ? 'Check-in GPS: ' + dist + 'm (' + now + ' WIB)'
+              : 'Check-in manual dicatat (' + now + ' WIB)',
+            'pin_drop'
+          );
           renderFieldSalesPwa(container);
         };
 
@@ -870,16 +893,16 @@
             function (pos) {
               var lat = pos.coords.latitude.toFixed(5);
               var lng = pos.coords.longitude.toFixed(5);
-              var acc = Math.min(25, Math.max(5, Math.round(pos.coords.accuracy || 12)));
-              finishCheckin(acc, lat + ', ' + lng + ' (GPS Perangkat)');
+              var acc = Math.round(pos.coords.accuracy || 12);
+              finishCheckin(acc, lat + ', ' + lng, 'GPS');
             },
             function () {
-              finishCheckin(Math.floor(8 + Math.random() * 12), '-7.5583, 110.8214 (Presisi GPS)');
+              finishCheckin(null, 'Check-in Manual', 'Manual');
             },
             { enableHighAccuracy: true, timeout: 2500, maximumAge: 60000 }
           );
         } else {
-          finishCheckin(Math.floor(8 + Math.random() * 12), '-7.5583, 110.8214 (Presisi GPS)');
+          finishCheckin(null, 'Check-in Manual', 'Manual');
         }
       });
     }
@@ -894,8 +917,7 @@
     }
 
     // Category Tabs
-    var catBtns = container.querySelectorAll('.btn-pwa-cat');
-    catBtns.forEach(function (btn) {
+    container.querySelectorAll('.btn-pwa-cat').forEach(function (btn) {
       btn.addEventListener('click', function () {
         state.activeCategory = btn.getAttribute('data-cat');
         renderFieldSalesPwa(container);
@@ -917,8 +939,7 @@
     }
 
     // Steppers Minus
-    var minusBtns = container.querySelectorAll('.btn-stepper-minus');
-    minusBtns.forEach(function (btn) {
+    container.querySelectorAll('.btn-stepper-minus').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var sku = btn.getAttribute('data-sku');
         var curr = state.cart[sku] || 0;
@@ -932,14 +953,13 @@
     });
 
     // Steppers Plus
-    var plusBtns = container.querySelectorAll('.btn-stepper-plus');
-    plusBtns.forEach(function (btn) {
+    container.querySelectorAll('.btn-stepper-plus').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var sku = btn.getAttribute('data-sku');
         var prodPlus = products.find(function (p) { return p.sku === sku; });
         var next = (state.cart[sku] || 0) + 1;
         if (prodPlus && next > prodPlus.stock) {
-          window.ArbaApp.showToast('Stok gudang ' + prodPlus.name + ' hanya tersisa ' + prodPlus.stock + ' unit', 'inventory_2');
+          window.ArbaApp.showToast('Stok tersisa ' + prodPlus.stock + ' unit', 'inventory_2');
           return;
         }
         state.cart[sku] = next;
@@ -970,7 +990,7 @@
       btnCheckout.addEventListener('click', function () {
         var totalQty = Object.keys(state.cart).reduce(function (s, sku) { return s + (state.cart[sku] || 0); }, 0);
         if (totalQty === 0) {
-          window.ArbaApp.showToast('Pilih minimal satu produk herbal untuk dipesan', 'warning');
+          window.ArbaApp.showToast('Pilih minimal satu produk terlebih dahulu', 'warning');
           return;
         }
 
@@ -1007,6 +1027,7 @@
           state.signatureDataUrl = null;
           state.shelfPhotoDataUrl = null;
           state.scannedQrBatches = [];
+          state.activeTab = 'outlet';
 
           window.ArbaStore.submitFieldSalesOrder({
             outletId: currentOutlet.code,
@@ -1020,26 +1041,25 @@
             geofenceValid: Boolean(ctx.isCheckedInHere),
             notes: savedNotes,
             signatureDataUrl: savedSignature,
-            signerName: currentOutlet.picName || 'Apoteker Penanggung Jawab',
+            signerName: currentOutlet.picName || 'PIC Outlet',
             shelfPhotoDataUrl: savedPhoto,
             scannedQrBatches: savedQrBatches,
             items: items
           });
 
           openThermalReceiptModal(currentOutlet, items, totalAmount, activeRep, savedSignature, savedPhoto);
-        }, 400);
+        }, 300);
       });
     }
   }
 
-  // Modal Pencatatan Kunjungan Tanpa Order (Canvassing / Visit-Only Log)
   function openVisitOnlyModal(outlet, salesRep, isCheckedIn) {
     var labels = window.ArbaStore.visitOutcomeLabels || {
       NO_ORDER_STOCK_FULL: 'Stok Outlet Masih Penuh',
-      COLLECTION: 'Penagihan Faktur Jatuh Tempo',
+      COLLECTION: 'Penagihan Faktur',
       FOLLOW_UP: 'Follow-up Minggu Depan',
-      PIC_ABSENT: 'PIC/Apoteker Sedang Tidak di Tempat',
-      DISPLAY_CHECK: 'Cek Display & Merchandising'
+      PIC_ABSENT: 'PIC Tidak di Tempat',
+      DISPLAY_CHECK: 'Cek Display'
     };
 
     var optionsHtml = Object.keys(labels)
@@ -1054,7 +1074,7 @@
         <div class="modal-header">
           <div class="flex items-center gap-2 text-on-surface">
             <span class="material-symbols-outlined text-primary text-[20px]">where_to_vote</span>
-            <h3 class="font-bold text-sm">Catat Kunjungan Tanpa Order (Canvassing)</h3>
+            <h3 class="font-bold text-sm">Catat Kunjungan</h3>
           </div>
           <button class="icon-btn" onclick="window.ArbaApp.closeModal()">
             <span class="material-symbols-outlined text-[18px]">close</span>
@@ -1063,34 +1083,34 @@
 
         <div class="modal-body text-xs space-y-3">
           <div class="bg-surface-container-low p-3 rounded-lg border border-border-subtle/60 space-y-1">
-            <div class="font-semibold text-on-surface">${outlet.name} (${outlet.cityName})</div>
-            <div class="text-on-surface-variant">Sales Rep: <b>${salesRep}</b> · GPS: <b>${isCheckedIn ? state.gpsDistance + 'm (Terverifikasi)' : 'Check-in Otomatis'}</b></div>
+            <div class="font-semibold text-on-surface">${window.ArbaUtils.escapeHtml(outlet.name)} (${window.ArbaUtils.escapeHtml(outlet.cityName)})</div>
+            <div class="text-on-surface-variant">Sales: <b>${window.ArbaUtils.escapeHtml(salesRep)}</b> · ${isCheckedIn && state.gpsDistance !== null ? 'GPS: <b>' + state.gpsDistance + 'm</b>' : 'Check-in Manual'}</div>
           </div>
 
           <div class="space-y-1">
-            <label class="font-semibold text-on-surface block">Hasil Kunjungan Lapangan</label>
-            <select id="visit-only-outcome" class="w-full p-2.5 rounded-lg border border-border-subtle bg-surface text-on-surface text-xs font-medium">
+            <label for="visit-only-outcome" class="form-label">Hasil Kunjungan</label>
+            <select id="visit-only-outcome" class="form-select text-xs font-medium">
               ${optionsHtml}
             </select>
           </div>
 
           <div class="space-y-1">
-            <label class="font-semibold text-on-surface block">Catatan Kunjungan / Temuan Rak &amp; Faktur</label>
+            <label for="visit-only-notes" class="form-label">Catatan (opsional)</label>
             <textarea
               id="visit-only-notes"
               rows="3"
-              placeholder="Contoh: Stok Madu Randu di etalase masih 18 botol, jadwal repeat order 5 hari lagi..."
-              class="w-full p-2.5 rounded-lg border border-border-subtle bg-surface text-on-surface text-xs"
+              placeholder="Ringkasan hasil kunjungan..."
+              class="form-textarea text-xs"
             ></textarea>
           </div>
 
           <div class="flex justify-end gap-2 pt-2">
-            <button type="button" class="px-3.5 py-2 rounded-lg bg-surface-container text-on-surface text-xs font-semibold cursor-pointer border-0" onclick="window.ArbaApp.closeModal()">
+            <button type="button" class="btn btn-outline btn-sm" onclick="window.ArbaApp.closeModal()">
               Batal
             </button>
-            <button type="button" id="btn-save-visit-only" class="px-4 py-2 rounded-lg bg-primary text-white text-xs font-semibold cursor-pointer border-0 flex items-center gap-1">
+            <button type="button" id="btn-save-visit-only" class="btn btn-primary btn-sm">
               <span class="material-symbols-outlined text-[15px]">check</span>
-              <span>Simpan Log Kunjungan</span>
+              <span>Simpan</span>
             </button>
           </div>
         </div>
@@ -1105,7 +1125,7 @@
         btnSave.onclick = function () {
           var outcomeEl = document.getElementById('visit-only-outcome');
           var notesEl = document.getElementById('visit-only-notes');
-          var dist = isCheckedIn ? state.gpsDistance : Math.floor(8 + Math.random() * 12);
+          var dist = isCheckedIn ? state.gpsDistance : null;
           state.gpsCheckedIn = true;
           state.gpsOutletCode = outlet.code;
           state.gpsDistance = dist;
@@ -1127,18 +1147,18 @@
     }, 30);
   }
 
-  // 58mm Mobile Thermal Receipt Modal
-  function openThermalReceiptModal(outlet, items, totalAmount, salesRepName, signatureDataUrl, shelfPhotoDataUrl) {
+  function openThermalReceiptModal(outlet, items, totalAmount, salesRepName, signatureDataUrl) {
     var appSt = window.ArbaStore.getState();
     var isOnline = appSt.isOnline;
     var activeSales = salesRepName || appSt.currentSalesRep || 'Budi Santoso';
+    var timeLabel = state.checkinTime ? ' (' + state.checkinTime + ')' : '';
 
     var modalHtml = `
       <div class="modal-dialog max-w-sm" style="max-width:380px;">
         <div class="modal-header">
-          <div class="flex items-center gap-2 text-slate-900">
+          <div class="flex items-center gap-2 text-on-surface">
             <span class="material-symbols-outlined text-emerald-600 text-[20px]">check_circle</span>
-            <h3 class="font-bold text-xs">Pesanan Berhasil Disimpan</h3>
+            <h3 class="font-bold text-xs">Nota Tersimpan</h3>
           </div>
           <button class="icon-btn" onclick="window.ArbaApp.closeModal()">
             <span class="material-symbols-outlined text-[18px]">close</span>
@@ -1146,70 +1166,67 @@
         </div>
 
         <div class="modal-body text-xs">
-          <!-- Clean Monospace Thermal Receipt Simulation -->
-          <div class="bg-slate-50 p-3.5 rounded-xl border border-dashed border-slate-300 font-mono text-[11px] text-slate-800 space-y-1.5 leading-tight" style="background:#f8fafc; border:1px dashed #cbd5e1; font-family:monospace; padding:0.875rem;">
-            <div class="text-center pb-1 border-b border-dashed border-slate-300 text-center" style="border-bottom:1px dashed #cbd5e1; padding-bottom:0.35rem;">
+          <div class="bg-slate-50 p-3.5 rounded-xl border border-dashed border-slate-300 font-mono text-[11px] text-slate-800 space-y-1.5 leading-tight">
+            <div class="text-center pb-1 border-b border-dashed border-slate-300">
               <div class="font-bold text-xs">CV ARBA'IN SURAKARTA</div>
-              <div class="text-[10px] text-slate-500">Distributor Logistik Farmasi Herbal</div>
+              <div class="text-[10px] text-slate-500">Distributor Farmasi Herbal</div>
             </div>
 
-            <div class="text-[10px] py-1 border-b border-dashed border-slate-300 space-y-0.5 text-slate-600" style="border-bottom:1px dashed #cbd5e1; padding:0.35rem 0;">
-              <div>Outlet: <b>${outlet.name}</b></div>
-              <div>Sales: ${activeSales} (${state.checkinTime})</div>
-              <div>Status: ${isOnline ? 'Tersinkron ke Pusat' : 'Tersimpan Offline'}</div>
-              <div>Termin: ${state.selectedTerm}</div>
+            <div class="text-[10px] py-1 border-b border-dashed border-slate-300 space-y-0.5 text-slate-600">
+              <div>Outlet: <b>${window.ArbaUtils.escapeHtml(outlet.name)}</b></div>
+              <div>Sales: ${window.ArbaUtils.escapeHtml(activeSales)}${window.ArbaUtils.escapeHtml(timeLabel)}</div>
+              <div>Status: ${isOnline ? 'Tersinkron' : 'Antrean Offline'}</div>
+              <div>Termin: ${window.ArbaUtils.escapeHtml(shortTerm(state.selectedTerm))}</div>
             </div>
 
-            <div class="py-1 space-y-1" style="padding:0.35rem 0;">
+            <div class="py-1 space-y-1">
               ${items.map(function (it) {
                 return `
-                  <div class="flex justify-between" style="display:flex; justify-content:space-between;">
-                    <span class="truncate max-w-[170px]">${it.name} x${it.quantity}</span>
-                    <span class="font-semibold">${window.ArbaUtils.formatRupiah(it.subtotal)}</span>
+                  <div class="flex justify-between gap-2">
+                    <span class="truncate">${window.ArbaUtils.escapeHtml(it.name)} x${it.quantity}</span>
+                    <span class="font-semibold shrink-0">${window.ArbaUtils.formatRupiah(it.subtotal)}</span>
                   </div>
                 `;
               }).join('')}
             </div>
 
-            <div class="pt-1.5 border-t border-dashed border-slate-300 flex justify-between font-bold text-xs text-slate-900" style="border-top:1px dashed #cbd5e1; padding-top:0.35rem; display:flex; justify-content:space-between;">
-              <span>TOTAL:</span>
+            <div class="pt-1.5 border-t border-dashed border-slate-300 flex justify-between font-bold text-xs text-slate-900">
+              <span>TOTAL</span>
               <span>${window.ArbaUtils.formatRupiah(totalAmount)}</span>
             </div>
 
             ${signatureDataUrl ? `
               <div class="pt-2 mt-1 border-t border-dashed border-slate-300 text-center">
-                <div class="text-[9px] text-slate-500 uppercase">Tanda Tangan Digital Apoteker / PIC</div>
-                <img src="${signatureDataUrl}" alt="TTD Apoteker" style="max-height:48px; margin:2px auto; display:block;" />
-                <div class="text-[10px] font-bold text-slate-700">${outlet.picName || 'Apoteker APA'}</div>
+                <div class="text-[9px] text-slate-500 uppercase">Tanda Tangan PIC</div>
+                <img src="${signatureDataUrl}" alt="TTD PIC" style="max-height:48px; margin:2px auto; display:block;" />
+                <div class="text-[10px] font-bold text-slate-700">${window.ArbaUtils.escapeHtml(outlet.picName || 'PIC Outlet')}</div>
               </div>
             ` : ''}
           </div>
 
-          <!-- Action buttons: WhatsApp Share + Thermal Print -->
           <div class="flex flex-col gap-2 pt-1">
             <button
               id="btn-thermal-share-wa"
               type="button"
-              class="w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs border-0"
+              class="btn w-full"
               style="background:#059669; color:#fff;"
             >
               <span class="material-symbols-outlined text-[16px]">share</span>
-              <span>Kirim Bukti via WhatsApp Apotek</span>
+              <span>Kirim via WhatsApp</span>
             </button>
             <div class="flex gap-2">
               <button
                 id="btn-thermal-print"
                 type="button"
-                class="flex-1 py-2 px-3 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold flex items-center justify-center gap-1 cursor-pointer border-0"
+                class="btn btn-outline flex-1"
               >
                 <span class="material-symbols-outlined text-[15px]">print</span>
-                <span>Cetak Struk</span>
+                <span>Cetak</span>
               </button>
               <button
                 id="btn-thermal-done"
                 type="button"
-                class="flex-1 py-2 px-3 rounded-lg bg-slate-900 hover:bg-black text-white text-xs font-semibold cursor-pointer border-0"
-                style="background:#0f172a; color:#fff;"
+                class="btn btn-primary flex-1"
               >
                 Selesai
               </button>
@@ -1226,18 +1243,18 @@
       if (btnWa) {
         btnWa.onclick = function () {
           var itemsText = items.map(function (it) {
-            return `• ${it.name}: ${it.quantity} unit (${window.ArbaUtils.formatRupiah(it.subtotal)})`;
+            return '• ' + it.name + ': ' + it.quantity + ' unit (' + window.ArbaUtils.formatRupiah(it.subtotal) + ')';
           }).join('%0A');
 
-          var msg = `*SURAT PESANAN B2B - CV ARBA'IN*%0AOutlet: ${outlet.name}%0ATanggal: ${new Date().toLocaleDateString('id-ID')}%0ASales: ${activeSales}%0ATermin: ${state.selectedTerm}%0A%0A*Rincian Produk:*%0A${itemsText}%0A%0A*Total: ${window.ArbaUtils.formatRupiah(totalAmount)}*%0A_Garansi resmi CDOB & FEFO CV Arba'in_`;
-          window.open(`https://wa.me/?text=${msg}`, '_blank');
+          var msg = '*SURAT PESANAN B2B - CV ARBA\'IN*%0AOutlet: ' + outlet.name + '%0ATanggal: ' + new Date().toLocaleDateString('id-ID') + '%0ASales: ' + activeSales + '%0ATermin: ' + shortTerm(state.selectedTerm) + '%0A%0A*Rincian:*%0A' + itemsText + '%0A%0A*Total: ' + window.ArbaUtils.formatRupiah(totalAmount) + '*';
+          window.open('https://wa.me/?text=' + msg, '_blank');
         };
       }
 
       var btnPrint = document.getElementById('btn-thermal-print');
       if (btnPrint) {
         btnPrint.onclick = function () {
-          window.ArbaApp.showToast('Struk dicetak ke printer Bluetooth 58mm', 'print');
+          window.ArbaApp.showToast('Mencetak struk 58mm', 'print');
           window.print();
         };
       }
@@ -1246,9 +1263,10 @@
       if (btnDone) {
         btnDone.onclick = function () {
           state.cart = {};
+          state.activeTab = 'outlet';
           window.ArbaApp.closeModal();
-          var container = document.getElementById('main-view-container');
-          if (container) renderFieldSalesPwa(container);
+          var mainContainer = document.getElementById('main-view-container');
+          if (mainContainer) renderFieldSalesPwa(mainContainer);
         };
       }
     }, 50);

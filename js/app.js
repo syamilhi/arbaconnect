@@ -94,7 +94,9 @@
       }
 
       // Jika belum ada user yang login, tampilkan khusus halaman Login dan jangan render halaman internal
+      var appWrapper = document.querySelector('.app-wrapper');
       if (!state.currentUser) {
+        if (appWrapper) appWrapper.classList.remove('pwa-mobile-only');
         container.innerHTML = '';
         if (window.ArbaAuth && typeof window.ArbaAuth.showLoginPortal === 'function') {
           window.ArbaAuth.showLoginPortal();
@@ -113,57 +115,24 @@
       }
 
       var navButtons = document.querySelectorAll('.nav-button');
-      var activeRole = (state.currentUser && state.currentUser.role === 'super-admin')
-        ? (state.currentRole || 'super-admin')
-        : state.currentUser.role;
-
-      // Sesuaikan nama menu navigasi dengan istilah kerja masing-masing role pengguna
-      var roleNavLabels = {
-        'super-admin': {
-          'executive-dashboard': 'Dasbor Direksi & Omset',
-          'inventory-stock-ledger': 'Gudang & Buku Besar Stok',
-          'b2b-crm-directory': 'Data Apotek & Konsinyasi',
-          'order-approval-queue': 'Verifikasi Faktur & Kirim',
-          'field-sales-pwa-preview': 'Aplikasi Sales Lapangan',
-          'user-management': 'Kelola Semua User & Akses',
-          'user-profile-settings': 'Profil & Ganti Password'
-        },
-        'executive': {
-          'executive-dashboard': 'Dasbor Direksi & Omset',
-          'inventory-stock-ledger': 'Pantauan Stok & FEFO',
-          'b2b-crm-directory': 'Mitra Apotek & Konsinyasi',
-          'order-approval-queue': 'Persetujuan Faktur & Kirim',
-          'field-sales-pwa-preview': 'Pantau Aplikasi Sales',
-          'user-profile-settings': 'Profil Direksi & Password'
-        },
-        'inventory': {
-          'inventory-stock-ledger': 'Stok Gudang & Batch FEFO',
-          'order-approval-queue': 'Siapkan Barang & Surat Jalan',
-          'user-profile-settings': 'Profil Gudang & Password'
-        },
-        'sales-ops': {
-          'order-approval-queue': 'Verifikasi Faktur & Tagihan',
-          'b2b-crm-directory': 'Data Apotek & Plafon Kredit',
-          'field-sales-pwa-preview': 'Pantau Input Nota Sales',
-          'user-profile-settings': 'Profil Admin & Password'
-        },
-        'field-sales': {
-          'field-sales-pwa-preview': 'Input Nota & Absen GPS',
-          'b2b-crm-directory': 'Apotek & Rute Kunjungan Saya',
-          'user-profile-settings': 'Profil Sales & Password'
-        }
+      var navLabels = {
+        'executive-dashboard': 'Dasbor',
+        'inventory-stock-ledger': 'Stok & Gudang',
+        'b2b-crm-directory': 'Mitra Outlet',
+        'order-approval-queue': 'Verifikasi Order',
+        'field-sales-pwa-preview': 'Aplikasi Sales',
+        'user-management': 'Manajemen User',
+        'user-profile-settings': 'Profil & Keamanan'
       };
-
-      var labelDict = roleNavLabels[activeRole] || roleNavLabels['executive'];
 
       navButtons.forEach(function (btn) {
         var path = btn.getAttribute('data-path');
         var isAllowed = allowedPaths.indexOf(path) !== -1;
         btn.style.display = isAllowed ? '' : 'none';
         var labelSpan = btn.querySelector('.nav-label');
-        if (labelSpan && labelDict[path]) {
-          labelSpan.textContent = labelDict[path];
-          btn.setAttribute('title', labelDict[path]);
+        if (labelSpan && navLabels[path]) {
+          labelSpan.textContent = navLabels[path];
+          btn.setAttribute('title', navLabels[path]);
         }
         if (path === state.currentPath) {
           btn.classList.add('active');
@@ -172,7 +141,9 @@
         }
       });
 
-      this.renderRoleContextBanner(state, activeRole);
+      if (appWrapper) {
+        appWrapper.classList.toggle('pwa-mobile-only', state.currentPath === 'field-sales-pwa-preview');
+      }
 
       // Render view module
       switch (state.currentPath) {
@@ -219,97 +190,6 @@
       }
 
       window.scrollTo(0, 0);
-    },
-
-    renderRoleContextBanner: function (state, activeRole) {
-      var strip = document.getElementById('role-context-strip');
-      if (!strip) return;
-      if (!state.currentUser) {
-        strip.innerHTML = '';
-        return;
-      }
-
-      var user = state.currentUser;
-      var analytics = window.ArbaStore.getAnalytics ? window.ArbaStore.getAnalytics() : {};
-      var pendingCount = state.orders.filter(function (o) { return o.status === 'PENDING'; }).length;
-      var orangeCount = (analytics.orangeStockAlarms && analytics.orangeStockAlarms.length) || 0;
-      var pinkCount = (analytics.pinkExpiryAlarms && analytics.pinkExpiryAlarms.length) || 0;
-      var usersCount = (state.users && state.users.length) || 12;
-
-      var roleConfigs = {
-        'super-admin': {
-          bg: 'linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%)',
-          border: '#c4b5fd',
-          badgeBg: '#6d28d9',
-          icon: 'shield_person',
-          roleTitle: 'SUPER ADMINISTRATOR (AKSES PENUH SELURUH DIVISI)',
-          headline: 'Halo, ' + user.name + ' — Pusat Kendali Sistem & Hak Akses Pegawai',
-          desc: 'Anda dapat mengakses seluruh 7 halaman operasional, mengelola ' + usersCount + ' akun pegawai, mengganti password user mana pun, serta menggunakan pengubah tampilan divisi di kanan atas untuk mengecek layar Direktur, Gudang, Admin Penjualan, maupun Sales.'
-        },
-        'executive': {
-          bg: 'linear-gradient(135deg, #f0fdfa 0%, #ccfbf1 100%)',
-          border: '#5eead4',
-          badgeBg: '#005c55',
-          icon: 'monitoring',
-          roleTitle: 'PERSPEKTIF DIREKTUR & MANAJEMEN PUNCAK',
-          headline: 'Ringkasan Eksekutif Harian untuk ' + user.name + ' (' + user.title + ')',
-          desc: 'Istilah & informasi disesuaikan untuk pengambilan keputusan direksi: Capaian Omset Bulanan (' + (analytics.revenuePct || 0) + '% dari target), ' + orangeCount + ' Peringatan Stok Menipis (Alarm Oranye), ' + pinkCount + ' Peringatan Barang Hampir Kedaluwarsa (Alarm Pink), serta Perkiraan Produksi Pabrik Bulan Depan.'
-        },
-        'inventory': {
-          bg: 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)',
-          border: '#7dd3fc',
-          badgeBg: '#0369a1',
-          icon: 'warehouse',
-          roleTitle: 'RUANG KERJA DIVISI GUDANG & LOGISTIK FEFO',
-          headline: 'Selamat Bertugas, ' + user.name + ' — Gudang Utama Kartasura',
-          desc: 'Istilah disesuaikan untuk operasional gudang: Fokus pada Stok Fisik Botol/Karton, Urutan Keluar Kedaluwarsa Terdekat (FEFO), ' + orangeCount + ' Produk di Bawah Batas Stok Aman (ROP), Penyiapan Barang untuk ' + pendingCount + ' Faktur Baru, serta Cek Fisik Barang Bawaan Sales Pagi vs Kembali Sore.'
-        },
-        'sales-ops': {
-          bg: 'linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%)',
-          border: '#d8b4fe',
-          badgeBg: '#7e22ce',
-          icon: 'fact_check',
-          roleTitle: 'MEJA KERJA DIVISI ADMIN PENJUALAN & PIUTANG APOTEK',
-          headline: 'Selamat Bertugas, ' + user.name + ' — Verifikasi Faktur & Administrasi Konsinyasi',
-          desc: 'Istilah disesuaikan untuk administrasi penjualan & keuangan: Fokus pada pemeriksaan ' + pendingCount + ' Faktur Pesanan Masuk dari HP Sales, pengecekan Sisa Plafon Kredit Apotek, pemeriksaan Tanda Tangan Apoteker & Foto Rak, serta pemantauan Tagihan Barang Titip Jual (Konsinyasi) yang sudah laku.'
-        },
-        'field-sales': {
-          bg: 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)',
-          border: '#fcd34d',
-          badgeBg: '#b45309',
-          icon: 'Directions_Bike',
-          roleTitle: 'APLIKASI KERJA HARIAN SALES LAPANGAN',
-          headline: 'Selamat Bertugas di Lapangan, ' + user.name + ' (' + user.division + ')',
-          desc: 'Tampilan & istilah disederhanakan khusus untuk kunjungan apotek: 1) Pilih Apotek & Absen Lokasi GPS, 2) Hitung Barang Titipan yang Laku / Scan QR Kemasan, 3) Minta Tanda Tangan Apoteker & Foto Rak, lalu Simpan Nota (tetap berjalan lancar meskipun sinyal internet mati).'
-        }
-      };
-
-      var cfg = roleConfigs[activeRole] || roleConfigs['executive'];
-      var subtitleEl = document.getElementById('header-brand-subtitle');
-      if (subtitleEl) {
-        subtitleEl.textContent = cfg.roleTitle;
-      }
-
-      strip.innerHTML = `
-        <div style="background:${cfg.bg}; border:1.5px solid ${cfg.border}; border-radius:14px; padding:12px 16px; display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-          <div style="display:flex; align-items:flex-start; gap:12px; flex:1; min-width:260px;">
-            <div style="width:38px; height:38px; border-radius:10px; background:${cfg.badgeBg}; color:#ffffff; display:flex; align-items:center; justify-content:center; flex-shrink:0; margin-top:2px;">
-              <span class="material-symbols-outlined" style="font-size:20px;">${cfg.icon}</span>
-            </div>
-            <div>
-              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                <span style="font-size:10px; font-weight:800; letter-spacing:0.05em; padding:2px 8px; border-radius:999px; background:${cfg.badgeBg}; color:#ffffff;">
-                  ${cfg.roleTitle}
-                </span>
-                <span style="font-size:13px; font-weight:800; color:#0f172a;">${cfg.headline}</span>
-              </div>
-              <p style="font-size:11.5px; color:#334155; margin:4px 0 0 0; line-height:1.45;">
-                ${cfg.desc}
-              </p>
-            </div>
-          </div>
-        </div>
-      `;
     },
 
     // Header interaction handling
@@ -432,53 +312,21 @@
             notifMenu.classList.add('hidden');
           }
         });
-
-        // Notifications item links
-        var notifOrder = document.getElementById('notif-item-order');
-        if (notifOrder) {
-          notifOrder.addEventListener('click', function () {
-            self.navigate('order-approval-queue');
-            notifMenu.classList.add('hidden');
-          });
-        }
-
-        var notifRop = document.getElementById('notif-item-rop');
-        if (notifRop) {
-          notifRop.addEventListener('click', function () {
-            self.navigate('inventory-stock-ledger');
-            notifMenu.classList.add('hidden');
-          });
-        }
-
-        var notifCdob = document.getElementById('notif-item-cdob');
-        if (notifCdob) {
-          notifCdob.addEventListener('click', function () {
-            self.showToast('Audit Kepatuhan CDOB: 99.4% Kepatuhan FEFO tervalidasi!', 'verified');
-            notifMenu.classList.add('hidden');
-          });
-        }
       }
 
-      // User profile pill click -> Open RBAC Profile & Account Switcher Modal
+      // User profile pill click -> Navigate to Profile & Security Settings
       var profilePill = document.getElementById('header-profile-pill');
       if (profilePill) {
         profilePill.addEventListener('click', function () {
-          if (window.ArbaAuth && typeof window.ArbaAuth.openProfileModal === 'function') {
-            window.ArbaAuth.openProfileModal();
-          } else {
-            var role = window.ArbaStore.getState().currentRole;
-            self.showToast(`Login sebagai: ${role.toUpperCase()} (CV Arba'in Logistik)`, 'account_circle');
-          }
+          self.navigate('user-profile-settings');
         });
       }
 
-      // Header Logout / Switch Role button -> Open Full Login Portal
+      // Header Logout button -> End session & show Login Portal
       var logoutBtn = document.getElementById('header-logout-btn');
       if (logoutBtn) {
         logoutBtn.addEventListener('click', function () {
-          if (window.ArbaAuth && typeof window.ArbaAuth.showLoginPortal === 'function') {
-            window.ArbaAuth.showLoginPortal();
-          }
+          window.ArbaStore.logoutUser();
         });
       }
     },
@@ -656,20 +504,73 @@
         darkIcon.textContent = state.isDarkMode ? 'light_mode' : 'dark_mode';
       }
 
-      // Notification badge
+      // Live Notification badge & menu items from store analytics
+      var analytics = window.ArbaStore.getAnalytics ? window.ArbaStore.getAnalytics() : {};
       var pendingCount = state.orders.filter(function (o) { return o.status === 'PENDING'; }).length;
+      var ropCount = (analytics.orangeStockAlarms && analytics.orangeStockAlarms.length) || 0;
+      var expiryCount = (analytics.pinkExpiryAlarms && analytics.pinkExpiryAlarms.length) || 0;
+      var totalAlerts = pendingCount + ropCount + expiryCount;
+
       var notifBadge = document.getElementById('header-notif-badge');
       var notifCountLabel = document.getElementById('notif-pending-count-label');
+      var notifList = document.getElementById('header-notif-list');
+      var notifMenu = document.getElementById('header-notif-menu');
 
       if (notifBadge) {
-        if (pendingCount > 0) {
-          notifBadge.classList.remove('hidden');
-        } else {
-          notifBadge.classList.add('hidden');
-        }
+        notifBadge.classList.toggle('hidden', totalAlerts === 0);
       }
       if (notifCountLabel) {
-        notifCountLabel.textContent = `${pendingCount} Pesanan Baru`;
+        notifCountLabel.textContent = totalAlerts > 0 ? totalAlerts + ' Perlu Perhatian' : 'Semua Normal';
+      }
+      if (notifList) {
+        var items = [];
+        if (pendingCount > 0) {
+          items.push({
+            path: 'order-approval-queue',
+            icon: 'shopping_bag',
+            iconColor: 'text-primary',
+            title: pendingCount + ' Pesanan Menunggu Verifikasi',
+            sub: 'Buka Antrean Order'
+          });
+        }
+        if (ropCount > 0) {
+          items.push({
+            path: 'inventory-stock-ledger',
+            icon: 'warning',
+            iconColor: 'text-amber-600',
+            title: ropCount + ' SKU Di Bawah ROP',
+            sub: 'Periksa Stok Gudang'
+          });
+        }
+        if (expiryCount > 0) {
+          items.push({
+            path: 'inventory-stock-ledger',
+            icon: 'event_busy',
+            iconColor: 'text-rose-600',
+            title: expiryCount + ' Batch Mendekati ED',
+            sub: 'Pantau Prioritas FEFO'
+          });
+        }
+        if (items.length === 0) {
+          notifList.innerHTML = '<div class="p-3 text-center text-on-surface-variant">Tidak ada notifikasi baru.</div>';
+        } else {
+          var self = this;
+          notifList.innerHTML = items.map(function (it) {
+            return '<div class="search-item notif-live-item flex items-center gap-2 cursor-pointer p-2 rounded-lg hover:bg-surface-container-low transition-colors" data-path="' + it.path + '">' +
+              '<span class="material-symbols-outlined ' + it.iconColor + ' text-[18px] shrink-0">' + it.icon + '</span>' +
+              '<div class="flex flex-col">' +
+                '<span class="font-medium text-on-surface">' + it.title + '</span>' +
+                '<span class="text-[11px] text-on-surface-variant">' + it.sub + '</span>' +
+              '</div></div>';
+          }).join('');
+          notifList.querySelectorAll('.notif-live-item').forEach(function (el) {
+            el.onclick = function () {
+              var p = el.getAttribute('data-path');
+              if (p) self.navigate(p);
+              if (notifMenu) notifMenu.classList.add('hidden');
+            };
+          });
+        }
       }
     },
 

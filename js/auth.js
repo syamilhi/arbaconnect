@@ -190,7 +190,8 @@
     // Jika belum ada user yang login, sembunyikan seluruh shell aplikasi utama agar murni tampil halaman login
     updateAppShellVisibility();
 
-    overlay.style.cssText = 'position:fixed; inset:0; z-index:9999; background:linear-gradient(135deg, #042f2e 0%, #0f172a 100%); display:flex; align-items:center; justify-content:center; padding:16px; overflow-y:auto;';
+    overlay.className = 'auth-overlay';
+    overlay.removeAttribute('style');
 
     var superAdminUser = users.find(function (u) { return u.role === 'super-admin'; }) || users[0];
     var dirUser = users.find(function (u) { return u.role === 'executive'; });
@@ -198,13 +199,13 @@
     var opsUser = users.find(function (u) { return u.role === 'sales-ops'; });
 
     overlay.innerHTML = `
-      <div style="width:100%; max-width:1040px; background:#ffffff; color:#0f172a; border-radius:22px; box-shadow:0 25px 60px -15px rgba(0,0,0,0.6); overflow:hidden; display:grid; grid-template-columns:repeat(auto-fit, minmax(350px, 1fr)); border:1px solid rgba(255,255,255,0.15); margin:auto;">
+      <div class="auth-card">
         
         <!-- KOLOM KIRI: HALAMAN LOGIN UTAMA (FORM KREDENSIAL & STATUS OFFLINE-FIRST) -->
-        <div style="padding:32px 28px; display:flex; flex-direction:column; justify-content:space-between; border-right:1px solid #e2e8f0; background:#ffffff;">
+        <div class="auth-col-left">
           <div>
             <!-- Brand Header -->
-            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:20px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:20px;">
               <div style="display:flex; align-items:center; gap:10px;">
                 <div style="width:42px; height:42px; border-radius:11px; background:linear-gradient(135deg, #005c55, #0f766e); display:flex; align-items:center; justify-content:center; color:#ffffff; font-weight:800; font-size:18px; box-shadow:0 4px 12px rgba(0,92,85,0.25);">
                   <span class="material-symbols-outlined" style="font-size:24px;">medication_liquid</span>
@@ -220,9 +221,9 @@
               </span>
             </div>
 
-            <h1 style="font-size:20px; font-weight:800; color:#0f172a; margin:0 0 6px 0;">Halaman Login Pengguna (RBAC)</h1>
+            <h1 style="font-size:20px; font-weight:800; color:#0f172a; margin:0 0 6px 0;">Masuk ke ArbaConnect</h1>
             <p style="font-size:12px; color:#64748b; margin:0 0 18px 0; line-height:1.5;">
-              Silakan masuk dengan akun Anda. Setiap akun hanya akan menampilkan menu halaman yang diizinkan sesuai rolenya.
+              Masukkan kredensial akun atau pilih akun akses cepat.
             </p>
 
             <!-- Error Alert -->
@@ -232,7 +233,7 @@
             <form id="arba-login-form" style="display:flex; flex-direction:column; gap:14px;">
               <div>
                 <label style="display:block; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:#475569; margin-bottom:5px;">
-                  Username / Email / ID Pengguna
+                  Username atau Email
                 </label>
                 <div style="position:relative;">
                   <span class="material-symbols-outlined" style="position:absolute; left:11px; top:50%; transform:translateY(-50%); font-size:18px; color:#64748b;">badge</span>
@@ -240,28 +241,25 @@
                     id="auth-identifier-input"
                     type="text"
                     required
-                    placeholder="Contoh: superadmin, direktur, gudang, salesops, budi"
-                    value="${currentUser ? currentUser.username : 'superadmin'}"
+                    placeholder="Username atau email"
+                    value="${currentUser ? currentUser.username : ''}"
                     style="width:100%; padding:10px 12px 10px 38px; border-radius:10px; border:1.5px solid #cbd5e1; font-size:13px; color:#0f172a; background:#f8fafc; outline:none; box-sizing:border-box;"
                   />
                 </div>
               </div>
 
               <div>
-                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:5px;">
-                  <label style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:#475569;">
-                    Password / PIN Offline
-                  </label>
-                  <span style="font-size:11px; color:#6d28d9; font-weight:700;">Super Admin: <b>admin123</b> | Role Lain: <b>123</b></span>
-                </div>
+                <label style="display:block; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:#475569; margin-bottom:5px;">
+                  Password atau PIN
+                </label>
                 <div style="position:relative;">
                   <span class="material-symbols-outlined" style="position:absolute; left:11px; top:50%; transform:translateY(-50%); font-size:18px; color:#64748b;">lock</span>
                   <input
                     id="auth-password-input"
                     type="password"
                     required
-                    placeholder="Masukkan password atau PIN 6 digit"
-                    value="${currentUser ? currentUser.password : 'admin123'}"
+                    placeholder="Password atau PIN"
+                    value=""
                     style="width:100%; padding:10px 38px 10px 38px; border-radius:10px; border:1.5px solid #cbd5e1; font-size:13px; color:#0f172a; background:#f8fafc; outline:none; box-sizing:border-box;"
                   />
                   <button
@@ -275,78 +273,59 @@
                 </div>
               </div>
 
-              <!-- Ringkasan Hak Akses Per Role -->
-              <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:10px 12px; font-size:11px; color:#475569; line-height:1.5;">
-                <div style="font-weight:800; color:#0f172a; margin-bottom:4px;">Penyesuaian Halaman &amp; Informasi Otomatis Sesuai Jabatan:</div>
-                <div>• <b style="color:#6d28d9;">Super Admin:</b> Akses Seluruh Sistem + Kelola Semua Akun Pegawai</div>
-                <div>• <b style="color:#005c55;">Direktur:</b> Dasbor Omset, Perkiraan Produksi Pabrik, Peringatan Stok &amp; Kedaluwarsa</div>
-                <div>• <b style="color:#0369a1;">Admin Gudang:</b> Stok Fisik Gudang, Batch FEFO, Bawaan Sales &amp; Penyiapan Barang Kirim</div>
-                <div>• <b style="color:#5b21b6;">Admin Penjualan:</b> Verifikasi Faktur Sales, Plafon Kredit Apotek &amp; Tagihan Konsinyasi</div>
-                <div>• <b style="color:#b45309;">Sales Lapangan:</b> Aplikasi HP Input Nota, Absen Lokasi GPS, Rute &amp; Daftar Apotek Saya</div>
-              </div>
-
               <button
                 id="auth-submit-btn"
                 type="submit"
                 style="width:100%; padding:11px 16px; border-radius:10px; border:0; background:linear-gradient(135deg, #005c55, #0f766e); color:#ffffff; font-size:13px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 6px 16px rgba(0,92,85,0.28);"
               >
                 <span class="material-symbols-outlined" style="font-size:18px;">login</span>
-                <span>Masuk ke Sistem ArbaConnect</span>
+                <span>Masuk</span>
               </button>
             </form>
           </div>
 
-          <!-- Footer Info Arsitektur -->
           <div style="margin-top:18px; padding-top:12px; border-top:1px solid #f1f5f9; display:flex; align-items:center; justify-content:space-between; font-size:11px; color:#64748b;">
-            <span>🔒 Kepatuhan CDOB &amp; RBAC Aktif</span>
+            <span>CV Arba'in Solo Raya</span>
             ${currentUser ? `
               <button id="auth-cancel-close-btn" type="button" style="background:transparent; border:1px solid #cbd5e1; padding:4px 10px; border-radius:6px; font-size:11px; font-weight:700; color:#334155; cursor:pointer;">
-                Kembali ke Sesi (${currentUser.name.split(' ')[0]})
+                Kembali (${currentUser.name.split(' ')[0]})
               </button>
-            ` : '<span>v2.5 Offline-First PWA</span>'}
+            ` : '<span>v3.0.0</span>'}
           </div>
         </div>
 
-        <!-- KOLOM KANAN: PILIH AKUN / ROLE UNTUK MASUK CEPAT -->
-        <div style="padding:26px 24px; background:#f8fafc; display:flex; flex-direction:column; justify-content:space-between; gap:12px;">
+        <!-- KOLOM KANAN: AKSES CEPAT AKUN DEMO -->
+        <div class="auth-col-right">
           <div>
-            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
               <span style="font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:0.06em; color:#005c55;">
-                Daftar Akun Resmi (${users.length} User Aktif)
+                Akses Cepat (${users.length} Akun)
               </span>
-              <span style="font-size:11px; font-weight:700; color:#6d28d9;">5 Level Role RBAC</span>
             </div>
-            <h2 style="font-size:15px; font-weight:800; color:#0f172a; margin:0 0 10px 0;">
-              Klik Kartu Akun untuk Masuk Sesuai Role
-            </h2>
 
             <div style="display:flex; flex-direction:column; gap:8px;">
-              <!-- Card 0: SUPER ADMIN (ALL ACCESS + USER MANAGEMENT) -->
               ${superAdminUser ? `
               <div
                 class="quick-role-card"
                 data-user-id="${superAdminUser.id}"
-                style="background:linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%); border:2px solid #8b5cf6; border-radius:12px; padding:11px 14px; cursor:pointer; transition:all 0.15s; display:flex; align-items:center; justify-content:space-between; gap:10px; box-shadow:0 4px 12px rgba(124,58,237,0.12);"
+                style="background:#ffffff; border:1.5px solid #c4b5fd; border-radius:12px; padding:10px 14px; cursor:pointer; transition:all 0.15s; display:flex; align-items:center; justify-content:space-between; gap:10px;"
               >
                 <div style="display:flex; align-items:center; gap:11px;">
-                  <div style="width:38px; height:38px; border-radius:10px; background:#6d28d9; color:#ffffff; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:13px; flex-shrink:0;">
+                  <div style="width:36px; height:36px; border-radius:10px; background:#6d28d9; color:#ffffff; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:12px; flex-shrink:0;">
                     ${superAdminUser.avatarInitials || 'SA'}
                   </div>
                   <div>
                     <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-                      <span style="font-size:13px; font-weight:800; color:#2e1065;">${superAdminUser.name}</span>
-                      <span style="font-size:10px; font-weight:800; padding:2px 7px; border-radius:999px; background:#6d28d9; color:#ffffff;">SUPER ADMIN</span>
+                      <span style="font-size:13px; font-weight:700; color:#0f172a;">${superAdminUser.name}</span>
+                      <span style="font-size:10px; font-weight:700; padding:2px 7px; border-radius:999px; background:#f3e8ff; color:#6d28d9;">SUPER ADMIN</span>
                     </div>
-                    <div style="font-size:11px; color:#4c1d95; margin-top:2px;">
-                      User: <b>${superAdminUser.username}</b> • Pass: <b>${superAdminUser.password}</b> • Akses Semua Modul &amp; Kelola Semua User
-                    </div>
+                    <div style="font-size:11px; color:#475569; margin-top:1px;">@${superAdminUser.username} · ${superAdminUser.title}</div>
                   </div>
                 </div>
                 <span class="material-symbols-outlined" style="color:#6d28d9; font-size:20px;">arrow_forward</span>
               </div>
               ` : ''}
 
-              <!-- Card 1: Direktur -->
               ${dirUser ? `
               <div
                 class="quick-role-card"
@@ -359,17 +338,16 @@
                   </div>
                   <div>
                     <div style="display:flex; align-items:center; gap:6px;">
-                      <span style="font-size:13px; font-weight:800; color:#0f172a;">${dirUser.name}</span>
+                      <span style="font-size:13px; font-weight:700; color:#0f172a;">${dirUser.name}</span>
                       <span style="font-size:10px; font-weight:700; padding:2px 7px; border-radius:999px; background:#e6f4f1; color:#005c55;">DIREKTUR</span>
                     </div>
-                    <div style="font-size:11px; color:#475569; margin-top:1px;">User: <b>${dirUser.username}</b> • Dashboard Eksekutif, Stok, CRM, Order &amp; PWA</div>
+                    <div style="font-size:11px; color:#475569; margin-top:1px;">@${dirUser.username} · ${dirUser.title}</div>
                   </div>
                 </div>
                 <span class="material-symbols-outlined" style="color:#005c55; font-size:20px;">arrow_forward</span>
               </div>
               ` : ''}
 
-              <!-- Card 2: Admin Gudang -->
               ${whUser ? `
               <div
                 class="quick-role-card"
@@ -382,17 +360,16 @@
                   </div>
                   <div>
                     <div style="display:flex; align-items:center; gap:6px;">
-                      <span style="font-size:13px; font-weight:800; color:#0f172a;">${whUser.name}</span>
-                      <span style="font-size:10px; font-weight:700; padding:2px 7px; border-radius:999px; background:#e0f2fe; color:#0369a1;">ADMIN GUDANG</span>
+                      <span style="font-size:13px; font-weight:700; color:#0f172a;">${whUser.name}</span>
+                      <span style="font-size:10px; font-weight:700; padding:2px 7px; border-radius:999px; background:#e0f2fe; color:#0369a1;">GUDANG</span>
                     </div>
-                    <div style="font-size:11px; color:#475569; margin-top:1px;">User: <b>${whUser.username}</b> • Hanya halaman Inventory FEFO &amp; Order Approval</div>
+                    <div style="font-size:11px; color:#475569; margin-top:1px;">@${whUser.username} · ${whUser.title}</div>
                   </div>
                 </div>
                 <span class="material-symbols-outlined" style="color:#0369a1; font-size:20px;">arrow_forward</span>
               </div>
               ` : ''}
 
-              <!-- Card 3: Admin Penjualan -->
               ${opsUser ? `
               <div
                 class="quick-role-card"
@@ -405,53 +382,47 @@
                   </div>
                   <div>
                     <div style="display:flex; align-items:center; gap:6px;">
-                      <span style="font-size:13px; font-weight:800; color:#0f172a;">${opsUser.name}</span>
-                      <span style="font-size:10px; font-weight:700; padding:2px 7px; border-radius:999px; background:#f3e8ff; color:#6d28d9;">ADMIN PENJUALAN</span>
+                      <span style="font-size:13px; font-weight:700; color:#0f172a;">${opsUser.name}</span>
+                      <span style="font-size:10px; font-weight:700; padding:2px 7px; border-radius:999px; background:#f3e8ff; color:#6d28d9;">PENJUALAN</span>
                     </div>
-                    <div style="font-size:11px; color:#475569; margin-top:1px;">User: <b>${opsUser.username}</b> • Hanya Order Approval, B2B CRM &amp; PWA</div>
+                    <div style="font-size:11px; color:#475569; margin-top:1px;">@${opsUser.username} · ${opsUser.title}</div>
                   </div>
                 </div>
                 <span class="material-symbols-outlined" style="color:#6d28d9; font-size:20px;">arrow_forward</span>
               </div>
               ` : ''}
 
-              <!-- Card 4: Tim Sales Lapangan (Pemilih Sales Rep) -->
               <div style="background:#fffbeb; border:1.5px solid #fcd34d; border-radius:12px; padding:11px 14px;">
                 <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
                   <div style="display:flex; align-items:center; gap:8px;">
-                    <span class="material-symbols-outlined" style="color:#d97706; font-size:19px;">smartphone</span>
-                    <span style="font-size:12px; font-weight:800; color:#78350f;">Sales Lapangan (Hanya Halaman PWA &amp; CRM)</span>
+                    <span class="material-symbols-outlined" style="color:#d97706; font-size:18px;">smartphone</span>
+                    <span style="font-size:12px; font-weight:700; color:#78350f;">Sales Lapangan</span>
                   </div>
-                  <span style="font-size:10px; font-weight:700; padding:2px 7px; border-radius:999px; background:#fef3c7; color:#b45309; border:1px solid #f59e0b;">${salesUsers.length} SALES</span>
+                  <span style="font-size:10px; font-weight:700; padding:2px 7px; border-radius:999px; background:#fef3c7; color:#b45309; border:1px solid #f59e0b;">${salesUsers.length} Akun</span>
                 </div>
-                <div style="display:flex; gap:8px;">
+                <div style="display:flex; align-items:center; gap:8px; min-width:0;">
                   <select
                     id="auth-quick-sales-select"
-                    style="flex:1; padding:7px 10px; border-radius:8px; border:1px solid #f59e0b; background:#ffffff; font-size:12px; font-weight:700; color:#0f172a;"
+                    style="flex:1 1 0%; min-width:0; width:100%; padding:8px 10px; border-radius:8px; border:1px solid #f59e0b; background:#ffffff; font-size:12px; font-weight:600; color:#0f172a; text-overflow:ellipsis;"
                   >
                     ${salesUsers.map(function (su) {
                       var selected = (st.currentSalesRep === su.salesRepName) ? 'selected' : '';
-                      return `<option value="${su.id}" ${selected}>${su.name} (${su.username}) — ${su.division.replace('Divisi ', '')}</option>`;
+                      return `<option value="${su.id}" ${selected}>${su.name} — ${su.division.replace('Divisi ', '')}</option>`;
                     }).join('')}
                   </select>
                   <button
                     id="auth-quick-sales-btn"
                     type="button"
-                    style="padding:7px 14px; border-radius:8px; border:0; background:#d97706; color:#ffffff; font-size:12px; font-weight:700; cursor:pointer; white-space:nowrap; display:flex; align-items:center; gap:4px;"
+                    style="flex-shrink:0; padding:8px 14px; border-radius:8px; border:0; background:#d97706; color:#ffffff; font-size:12px; font-weight:700; cursor:pointer; white-space:nowrap; display:inline-flex; align-items:center; gap:4px;"
                   >
-                    <span>Masuk Sales</span>
+                    <span>Masuk</span>
                     <span class="material-symbols-outlined" style="font-size:16px;">chevron_right</span>
                   </button>
                 </div>
               </div>
             </div>
           </div>
-
-          <div style="background:#eef2ff; padding:9px 12px; border-radius:10px; border:1px solid #c7d2fe; font-size:11px; color:#3730a3; line-height:1.4;">
-            💡 <b>Info Akun &amp; Password:</b> Setelah login, setiap user memiliki menu <b>Profil &amp; Ganti Password</b> di sidebar kiri untuk mengedit detail profil &amp; mengganti passwordnya sendiri.
-          </div>
         </div>
-
       </div>
     `;
 
