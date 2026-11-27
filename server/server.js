@@ -1968,14 +1968,25 @@ function isMutationAllowedForUser(callerUser, mut, fullState) {
 }
 
 function readJsonBody(req) {
+  const MAX_BODY_BYTES = 2 * 1024 * 1024;
   return new Promise((resolve, reject) => {
     // Di Vercel Serverless Functions, runtime otomatis mem-parsing JSON body ke req.body
     // dan stream request bisa sudah selesai (readableEnded) sebelum handler dipanggil.
     if (req && req.body !== undefined) {
       if (typeof req.body === 'object' && req.body !== null && !Buffer.isBuffer(req.body)) {
+        try {
+          if (Buffer.byteLength(JSON.stringify(req.body), 'utf8') > MAX_BODY_BYTES) {
+            return reject(new Error('Payload terlalu besar (maksimal 2 MB)'));
+          }
+        } catch (e) {
+          return reject(e);
+        }
         return resolve(req.body);
       }
       if (typeof req.body === 'string') {
+        if (Buffer.byteLength(req.body, 'utf8') > MAX_BODY_BYTES) {
+          return reject(new Error('Payload terlalu besar (maksimal 2 MB)'));
+        }
         if (!req.body.trim()) return resolve({});
         try {
           return resolve(JSON.parse(req.body));
@@ -1984,6 +1995,9 @@ function readJsonBody(req) {
         }
       }
       if (Buffer.isBuffer(req.body)) {
+        if (req.body.length > MAX_BODY_BYTES) {
+          return reject(new Error('Payload terlalu besar (maksimal 2 MB)'));
+        }
         const text = req.body.toString('utf8').trim();
         if (!text) return resolve({});
         try {
@@ -2001,7 +2015,7 @@ function readJsonBody(req) {
     let raw = '';
     req.on('data', (chunk) => {
       raw += chunk;
-      if (raw.length > 2 * 1024 * 1024) {
+      if (Buffer.byteLength(raw, 'utf8') > MAX_BODY_BYTES) {
         reject(new Error('Payload terlalu besar (maksimal 2 MB)'));
       }
     });

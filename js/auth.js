@@ -110,13 +110,13 @@
       function (s) { return String(s || ''); };
     var candidateHash = hashFn(pw);
     var seedUsers = (window.ArbaData && window.ArbaData.users) || [];
-    var seedMatch = seedUsers.find(function (su) {
+    var seedMatch = (!user.passwordChangedOnServer) ? seedUsers.find(function (su) {
       return su && (su.id === user.id || String(su.username || '').toLowerCase() === String(user.username || '').toLowerCase());
-    });
+    }) : null;
     var expectedPwHash = user.passwordHash || (user.password ? hashFn(user.password) : '') || (seedMatch && seedMatch.passwordHash) || '';
     var expectedPinHash = user.pinHash || (user.pin ? hashFn(user.pin) : '') || (seedMatch && seedMatch.pinHash) || '';
 
-    if (candidateHash === expectedPwHash || (expectedPinHash && candidateHash === expectedPinHash)) {
+    if (expectedPwHash && (candidateHash === expectedPwHash || (expectedPinHash && candidateHash === expectedPinHash))) {
       return { ok: true, user: user };
     }
 

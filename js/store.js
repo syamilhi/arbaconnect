@@ -599,6 +599,7 @@ window.ArbaStore = (function() {
     }
 
     target.passwordHash = hashCredential(nextPw);
+    target.passwordChangedOnServer = true;
     delete target.password;
     if (newPin && String(newPin).trim().length >= 4) {
       target.pinHash = hashCredential(String(newPin).trim());

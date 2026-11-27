@@ -8,7 +8,7 @@
  * 3. API Pusat (/api/*): Network-Only (dikelola oleh OfflineSync Queue + IndexedDB di sisi aplikasi).
  */
 
-const CACHE_VERSION = 'arbaconnect-pwa-v27';
+const CACHE_VERSION = 'arbaconnect-pwa-v29';
 const FONT_CACHE = 'arbaconnect-fonts-v1';
 const MAP_CACHE = 'arbaconnect-map-tiles-v1';
 
@@ -107,15 +107,29 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Navigasi halaman HTML -> Network-First (no-store) dengan fallback cache bila offline
+  // Navigasi halaman HTML -> Network-First (tanpa mengembalikan redirected response agar PWA tidak ERR_FAILED)
   if (req.mode === 'navigate') {
     event.respondWith(
-      fetch(req.url, { cache: 'no-store' }).then((res) => {
+      fetch('/', { cache: 'no-store' }).then((res) => {
+        if (!res || !res.ok) {
+          throw new Error('HTTP ' + (res && res.status));
+        }
         const clone = res.clone();
-        caches.open(CACHE_VERSION).then((cache) => cache.put('./index.html', clone));
+        caches.open(CACHE_VERSION).then((cache) => {
+          cache.put('./', clone.clone());
+          cache.put('./index.html', clone);
+        });
+        // Jika response berasal dari redirect, bungkus ulang sebagai Response bersih agar Chrome PWA tidak memblokir (ERR_FAILED)
+        if (res.redirected) {
+          return res.text().then((htmlText) => new Response(htmlText, {
+            status: 200,
+            statusText: 'OK',
+            headers: { 'Content-Type': 'text/html; charset=utf-8' }
+          }));
+        }
         return res;
       }).catch(() => {
-        return caches.match('./index.html') || caches.match('./');
+        return caches.match('./').then((cachedRoot) => cachedRoot || caches.match('./index.html'));
       })
     );
     return;
