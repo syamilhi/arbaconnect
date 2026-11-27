@@ -1027,11 +1027,27 @@
       });
     }
 
-    // Single Approve
+    // Single Approve dengan Guardrail Kepatuhan CDOB (FEFO Kritis, Kredit Overdue, Legalitas SIPA)
     var approveBtns = container.querySelectorAll('.btn-approve-single');
     approveBtns.forEach(function (btn) {
       btn.addEventListener('click', function () {
         var orderId = btn.getAttribute('data-order-id');
+        if (window.ArbaStore && typeof window.ArbaStore.validateOrderCompliance === 'function') {
+          var check = window.ArbaStore.validateOrderCompliance(orderId);
+          if (!check.ok && check.blockers.length > 0) {
+            var proceed = window.confirm(
+              'PERINGATAN GUARDRAIL CDOB & KREDIT B2B:\n\n- ' +
+              check.blockers.join('\n- ') +
+              '\n\nApakah Anda yakin ingin tetap melakukan override otorisasi (akan dicatat pada Audit Trail)?'
+            );
+            if (!proceed) {
+              window.ArbaApp.showToast('Otorisasi ditahan oleh Guardrail CDOB — silakan lakukan substitusi batch / verifikasi kredit terlebih dahulu.', 'gpp_maybe');
+              return;
+            }
+          } else if (check.warnings && check.warnings.length > 0) {
+            window.ArbaApp.showToast('Catatan Kepatuhan: ' + check.warnings[0], 'warning');
+          }
+        }
         window.ArbaStore.approveOrder(orderId);
       });
     });
@@ -1192,10 +1208,12 @@
               </thead>
               <tbody>
                 ${order.items.map(function (it, idx) {
+                  var prodRef = (window.ArbaStore.getState().products || []).find(function (p) { return p.sku === it.sku; });
+                  var nieTag = (prodRef && prodRef.nieBpom) ? `<div class="text-[10px] font-mono text-slate-500">NIE: ${window.ArbaUtils.escapeHtml(prodRef.nieBpom)}</div>` : '';
                   return `
                     <tr class="border-b border-slate-200 bg-white text-slate-800">
                       <td class="border border-slate-300 p-2">${idx + 1}</td>
-                      <td class="border border-slate-300 p-2 font-medium">${window.ArbaUtils.escapeHtml(it.name)}</td>
+                      <td class="border border-slate-300 p-2 font-medium">${window.ArbaUtils.escapeHtml(it.name)}${nieTag}</td>
                       <td class="border border-slate-300 p-2 font-mono text-[11px]">${window.ArbaUtils.escapeHtml(it.batch)} (${window.ArbaUtils.escapeHtml(it.expiry)})</td>
                       <td class="border border-slate-300 p-2 text-center font-bold">${it.quantity}</td>
                       <td class="border border-slate-300 p-2 text-right font-mono">${window.ArbaUtils.formatRupiah(it.unitPrice)}</td>

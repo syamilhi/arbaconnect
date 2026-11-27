@@ -2531,6 +2531,158 @@ window.ArbaStore = (function() {
     };
   }
 
+  // ---------------------------------------------------------------------------
+  // CDOB Guardrail: Validasi Kepatuhan FEFO Kritis, Plafon Kredit & Legalitas SIPA
+  // ---------------------------------------------------------------------------
+  function validateOrderCompliance(orderOrId) {
+    const order = typeof orderOrId === 'string'
+      ? state.orders.find(o => o.id === orderOrId || o.clientUuid === orderOrId)
+      : orderOrId;
+    if (!order) return { ok: true, blockers: [], warnings: [] };
+
+    const blockers = [];
+    const warnings = [];
+    const outlet = state.outlets.find(o => o.id === order.outletId || o.name === order.outletName);
+
+    // 1. Cek batch FEFO kritis (<30 Hari) atau dikarantina
+    (order.items || []).forEach((it) => {
+      const prod = state.products.find(p => p.sku === it.sku || (it.name && p.name.includes(it.name)));
+      if (prod) {
+        const isCritical = prod.status === 'critical-expiry' || (prod.fefoStatus && prod.fefoStatus.indexOf('Kritis') === 0);
+        if (isCritical && !String(it.batch || '').includes('Gudang B')) {
+          blockers.push(`CDOB FEFO: ${prod.name} (${prod.activeBatch}) masa edar KRITIS (<30 hari / ${prod.fefoDate}). Lakukan substitusi batch terlebih dahulu.`);
+        }
+        if (prod.quarantined) {
+          blockers.push(`KARANTINA BPOM: Batch ${prod.activeBatch} (${prod.name}) sedang dikarantina dan dilarang didistribusikan.`);
+        }
+      }
+    });
+
+    // 2. Cek status kredit & plafon outlet
+    if (outlet) {
+      if (outlet.creditStatus === 'Overdue') {
+        blockers.push(`KREDIT OVERDUE: ${outlet.name} memiliki tagihan jatuh tempo. Pelunasan/persetujuan Direksi diperlukan.`);
+      } else if (outlet.terms !== 'COD Cash' && outlet.creditLimit > 0 && ((outlet.creditUsed || 0) + (order.totalAmount || 0)) > outlet.creditLimit) {
+        warnings.push(`Plafon kredit ${outlet.name} akan terlampaui (Sisa: Rp ${(outlet.creditRemaining || 0).toLocaleString('id-ID')}).`);
+      }
+      if (outlet.sipaStatus === 'Kadaluarsa') {
+        blockers.push(`LEGALITAS SIPA: Izin SIPA/SIA ${outlet.name} sudah kadaluarsa (${outlet.sipaExpiry || '-'}).`);
+      } else if (outlet.sipaStatus === 'Segera Habis') {
+        warnings.push(`Legalitas SIPA ${outlet.name} segera berakhir (${outlet.sipaExpiry || '-'}). Ingatkan APA untuk perpanjangan.`);
+      }
+    }
+
+    return {
+      ok: blockers.length === 0,
+      blockers,
+      warnings
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // CDOB Batch Recall (1-Klik Pelacakan & Penarikan Batch BPOM)
+  // ---------------------------------------------------------------------------
+  function getBatchRecallReport(skuOrBatch) {
+    const q = String(skuOrBatch || '').trim().toLowerCase();
+    const product = state.products.find(p =>
+      p.sku.toLowerCase() === q || String(p.activeBatch || '').toLowerCase() === q
+    ) || state.products[0];
+    if (!product) return null;
+
+    const batchKey = String(product.activeBatch || '').toLowerCase();
+    const shortBatchKey = batchKey.replace(/^batch-/, 'b-');
+    const affectedOutletsMap = {};
+    let totalDistributedUnits = 0;
+
+    (state.orders || []).forEach((ord) => {
+      if (ord.status === 'REJECTED') return;
+      (ord.items || []).forEach((it) => {
+        const itBatch = String(it.batch || '').toLowerCase();
+        const matchSku = it.sku === product.sku;
+        const matchBatch = itBatch.includes(batchKey) || itBatch.includes(shortBatchKey);
+        if (matchSku || matchBatch) {
+          const outObj = state.outlets.find(o => o.id === ord.outletId || o.name === ord.outletName);
+          const key = (outObj && outObj.id) || ord.outletId || ord.outletName;
+          if (!affectedOutletsMap[key]) {
+            affectedOutletsMap[key] = {
+              outletId: key,
+              outletName: (outObj && outObj.name) || ord.outletName,
+              city: (outObj && outObj.cityName) || ord.city || 'Solo Raya',
+              picName: (outObj && outObj.picName) || 'Apoteker Penanggung Jawab',
+              picPhone: (outObj && outObj.picPhone) || '6281234567890',
+              noSia: (outObj && outObj.noSia) || '-',
+              totalQty: 0,
+              invoices: []
+            };
+          }
+          affectedOutletsMap[key].totalQty += Number(it.quantity) || 0;
+          affectedOutletsMap[key].invoices.push({
+            orderId: ord.id,
+            status: ord.status,
+            orderTime: ord.orderTime,
+            qty: Number(it.quantity) || 0
+          });
+          totalDistributedUnits += Number(it.quantity) || 0;
+        }
+      });
+    });
+
+    const affectedOutlets = Object.values(affectedOutletsMap).sort((a, b) => b.totalQty - a.totalQty);
+    const ledgerHits = (state.ledger || []).filter(l =>
+      l.skuCode === product.sku || String(l.batch || '').toLowerCase().includes(batchKey)
+    );
+
+    return {
+      product,
+      batchCode: product.activeBatch,
+      warehouseStock: product.stock,
+      totalDistributedUnits,
+      affectedOutlets,
+      ledgerCount: ledgerHits.length,
+      generatedAt: nowStamp()
+    };
+  }
+
+  function quarantineBatch(sku, reason) {
+    const product = state.products.find(p => p.sku === sku);
+    if (!product) return null;
+
+    const prevStock = Number(product.stock) || 0;
+    product.quarantined = true;
+    product.quarantineReason = reason || 'Penarikan / Karantina Batch CDOB BPOM';
+    product.quarantinedAt = nowStamp();
+    product.status = 'critical-expiry';
+    product.fefoStatus = 'Dikarantina (Recall CDOB)';
+
+    const operatorName = (state.currentUser && state.currentUser.name) || 'Chief Auditor Intern';
+    const ledgerId = 'LEDG-RCL-' + String(Math.floor(10000 + Math.random() * 89999));
+    state.ledger.unshift({
+      id: ledgerId,
+      timestamp: nowStamp(),
+      docRef: `RECALL-${product.activeBatch}`,
+      skuName: product.name,
+      skuCode: product.sku,
+      batch: product.activeBatch,
+      type: 'PENYESUAIAN',
+      quantity: 0,
+      finalStock: prevStock,
+      operator: operatorName,
+      operatorRole: 'QA / CDOB Recall Officer',
+      notes: `KARANTINA BATCH: ${product.quarantineReason}`,
+      hash: pseudoHash(`${ledgerId}|${product.sku}|${product.activeBatch}|QUARANTINE|${prevStock}`)
+    });
+
+    showToast(`Batch ${product.activeBatch} (${product.name}) resmi dikarantina & dikunci dari distribusi!`, 'gpp_maybe');
+    notify();
+    syncMutationToServer('ADJUST_STOCK', {
+      sku: product.sku,
+      delta: 0,
+      reason: `KARANTINA CDOB: ${product.quarantineReason}`,
+      batch: product.activeBatch
+    }, `Karantina Batch ${product.activeBatch}`);
+    return product;
+  }
+
   // Initialize theme on load
   if (state.isDarkMode) {
     document.documentElement.classList.add('dark');
@@ -2583,6 +2735,9 @@ window.ArbaStore = (function() {
     warehouseHq: WAREHOUSE_HQ,
     haversineKm,
     verifyLedgerChainIntegrity,
+    validateOrderCompliance,
+    getBatchRecallReport,
+    quarantineBatch,
     submitFieldSalesOrder,
     logFieldVisit,
     setCurrentSalesRep,

@@ -35,6 +35,9 @@ CREATE TABLE outlets (
     lng             NUMERIC(10, 7),
     kontak_nama     VARCHAR(120),
     kontak_telp     VARCHAR(32),
+    no_sia          VARCHAR(64), -- Nomor Surat Izin Apotek (CDOB BPOM)
+    no_sipa         VARCHAR(64), -- Nomor SIPA Apoteker Penanggung Jawab
+    sipa_berlaku_hingga DATE,
     termin_hari     INTEGER NOT NULL DEFAULT 30,
     limit_kredit    BIGINT  NOT NULL DEFAULT 10000000,
     kredit_terpakai BIGINT  NOT NULL DEFAULT 0,
@@ -71,6 +74,9 @@ CREATE TABLE products (
     sku                 VARCHAR(40) UNIQUE NOT NULL,
     nama                VARCHAR(160) NOT NULL,
     kategori            VARCHAR(64)  NOT NULL,
+    nie_bpom            VARCHAR(48), -- Nomor Izin Edar BPOM (POM TR / MD / NA)
+    no_halal            VARCHAR(48), -- Nomor Sertifikat Halal BPJPH
+    suhu_simpan         VARCHAR(32)  NOT NULL DEFAULT '15-25°C (Kering)',
     satuan              VARCHAR(24)  NOT NULL DEFAULT 'Botol',
     harga               BIGINT  NOT NULL,
     stok_minimum        INTEGER NOT NULL DEFAULT 50,

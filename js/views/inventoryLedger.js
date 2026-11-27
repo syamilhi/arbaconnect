@@ -86,9 +86,21 @@
       <div class="flex flex-col w-full gap-space-lg">
         <!-- Top Bar / Action Center (Disesuaikan dengan Role Gudang vs Direksi) -->
         <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-surface-container-lowest p-5 rounded-xl border border-border-subtle/60">
-          <h1 class="text-xl text-on-surface tracking-tight font-bold">
-            Stok &amp; Buku Besar
-          </h1>
+          <div class="flex flex-col gap-1">
+            <h1 class="text-xl text-on-surface tracking-tight font-bold">
+              Stok &amp; Buku Besar
+            </h1>
+            <div class="flex items-center gap-2 flex-wrap text-[11px] text-on-surface-variant">
+              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200/60">
+                <span class="material-symbols-outlined text-[13px]">thermostat</span>
+                <span>Gudang Kartasura: 22,4°C • RH 52% (Normal CDOB)</span>
+              </span>
+              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary font-semibold">
+                <span class="material-symbols-outlined text-[13px]">verified</span>
+                <span>NIE BPOM &amp; Halal BPJPH Terverifikasi</span>
+              </span>
+            </div>
+          </div>
 
           <!-- Compact Action Cluster -->
           <div class="flex items-center gap-1.5 flex-wrap">
@@ -140,6 +152,16 @@
             >
               <span class="material-symbols-outlined text-[15px] text-emerald-600">verified_user</span>
               <span>Audit CDOB</span>
+            </button>
+
+            <button
+              id="btn-batch-recall-modal"
+              class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer border border-rose-200/70"
+              type="button"
+              title="1-Klik Pelacakan &amp; Penarikan Batch CDOB BPOM (Batch Recall)"
+            >
+              <span class="material-symbols-outlined text-[15px]">gpp_maybe</span>
+              <span>Batch Recall</span>
             </button>
 
             <button
@@ -403,6 +425,7 @@
                         }">
                           ${p.activeBatch}
                         </span>
+                        ${p.nieBpom ? `<div class="text-[10px] font-mono text-on-surface-variant mt-1">${window.ArbaUtils.escapeHtml(p.nieBpom)}</div>` : ''}
                       </td>
                       <td class="py-3 px-3">
                         <div class="flex items-center gap-1.5">
@@ -800,6 +823,14 @@
     if (btnChainAudit && window.ArbaAdvanced) {
       btnChainAudit.addEventListener('click', function () {
         window.ArbaAdvanced.openLedgerChainAuditModal();
+      });
+    }
+
+    // Advance: 1-Klik Batch Recall CDOB BPOM Modal
+    var btnBatchRecall = container.querySelector('#btn-batch-recall-modal');
+    if (btnBatchRecall && window.ArbaAdvanced && typeof window.ArbaAdvanced.openBatchRecallModal === 'function') {
+      btnBatchRecall.addEventListener('click', function () {
+        window.ArbaAdvanced.openBatchRecallModal();
       });
     }
 

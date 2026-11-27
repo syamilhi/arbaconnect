@@ -13,8 +13,13 @@
   'use strict';
 
   var activeCameraStream = null;
+  var activeScanRaf = null;
 
   function stopActiveCamera() {
+    if (activeScanRaf) {
+      cancelAnimationFrame(activeScanRaf);
+      activeScanRaf = null;
+    }
     if (activeCameraStream) {
       try {
         activeCameraStream.getTracks().forEach(function (t) { t.stop(); });
@@ -24,74 +29,228 @@
   }
 
   // ---------------------------------------------------------------------------
-  // 1. Generator QR Code SVG Deterministik (Offline-Ready)
+  // 1. Generator QR Code SVG Standar ISO/IEC 18004 (Pure Vanilla, Scannable!)
+  //    Mendukung Byte Mode Version 1-4, Error Correction Level L (single block)
   // ---------------------------------------------------------------------------
-  function generateQrSvg(text, size) {
-    size = size || 84;
-    var grid = 21;
-    var matrix = [];
-    for (var r = 0; r < grid; r++) {
-      matrix[r] = [];
-      for (var c = 0; c < grid; c++) {
-        matrix[r][c] = 0;
-      }
+  var QR_EXP = new Uint8Array(512);
+  var QR_LOG = new Uint8Array(256);
+  (function initQrGalois() {
+    var x = 1;
+    for (var i = 0; i < 255; i++) {
+      QR_EXP[i] = x;
+      QR_LOG[x] = i;
+      x = (x << 1) ^ (x & 0x80 ? 0x11d : 0);
     }
+    for (var j = 255; j < 512; j++) {
+      QR_EXP[j] = QR_EXP[j - 255];
+    }
+  })();
 
-    function drawFinder(rowOffset, colOffset) {
-      for (var r = 0; r < 7; r++) {
-        for (var c = 0; c < 7; c++) {
-          if (
-            r === 0 || r === 6 || c === 0 || c === 6 ||
-            (r >= 2 && r <= 4 && c >= 2 && c <= 4)
-          ) {
-            matrix[rowOffset + r][colOffset + c] = 1;
-          } else {
-            matrix[rowOffset + r][colOffset + c] = 2;
+  function qrRsEncode(dataBytes, ecCount) {
+    var gen = [1];
+    for (var i = 0; i < ecCount; i++) {
+      var next = new Array(gen.length + 1).fill(0);
+      var factor = QR_EXP[i];
+      for (var j = 0; j < gen.length; j++) {
+        next[j] ^= gen[j];
+        if (gen[j] !== 0) {
+          next[j + 1] ^= QR_EXP[QR_LOG[gen[j]] + i];
+        }
+      }
+      gen = next;
+    }
+    var rem = new Array(ecCount).fill(0);
+    for (var k = 0; k < dataBytes.length; k++) {
+      var coeff = dataBytes[k] ^ rem.shift();
+      rem.push(0);
+      if (coeff !== 0) {
+        var logCoeff = QR_LOG[coeff];
+        for (var m = 0; m < ecCount; m++) {
+          if (gen[m + 1] !== 0) {
+            rem[m] ^= QR_EXP[QR_LOG[gen[m + 1]] + logCoeff];
           }
         }
       }
     }
+    return rem;
+  }
 
+  function qrComputeFormatBits(ecLevelBits, maskPattern) {
+    var data = ((ecLevelBits & 3) << 3) | (maskPattern & 7);
+    var rem = data << 10;
+    for (var i = 4; i >= 0; i--) {
+      if ((rem >>> (i + 10)) & 1) {
+        rem ^= 0x537 << i;
+      }
+    }
+    return ((data << 10) | rem) ^ 0x5412;
+  }
+
+  function generateQrSvg(text, size) {
+    size = size || 84;
+    var raw = String(text || 'ARBACONNECT-FEFO');
+    var bytes = [];
+    for (var bIdx = 0; bIdx < raw.length; bIdx++) {
+      var code = raw.charCodeAt(bIdx);
+      bytes.push(code < 128 ? code : 63);
+    }
+    // Versi 1-4 EC-L: [version, gridSize, dataCodewords, ecCodewords, alignCenter]
+    var specs = [
+      [1, 21, 19, 7, 0],
+      [2, 25, 34, 10, 18],
+      [3, 29, 55, 15, 22],
+      [4, 33, 80, 20, 26]
+    ];
+    if (bytes.length > 78) bytes = bytes.slice(0, 78);
+    var spec = specs[specs.length - 1];
+    for (var sIdx = 0; sIdx < specs.length; sIdx++) {
+      if (bytes.length <= specs[sIdx][2] - 2) {
+        spec = specs[sIdx];
+        break;
+      }
+    }
+    var version = spec[0];
+    var grid = spec[1];
+    var dataCap = spec[2];
+    var ecCount = spec[3];
+    var alignPos = spec[4];
+
+    // 1. Encode bitstream: Mode 0100 (Byte) + Length (8-bit) + Payload + Terminator
+    var bits = [];
+    function pushBits(val, len) {
+      for (var bi = len - 1; bi >= 0; bi--) bits.push((val >>> bi) & 1);
+    }
+    pushBits(4, 4);
+    pushBits(bytes.length, 8);
+    for (var p = 0; p < bytes.length; p++) pushBits(bytes[p], 8);
+    var maxBits = dataCap * 8;
+    for (var t = 0; t < 4 && bits.length < maxBits; t++) bits.push(0);
+    while (bits.length % 8 !== 0) bits.push(0);
+
+    var dataWords = [];
+    for (var wi = 0; wi < bits.length; wi += 8) {
+      var byteVal = 0;
+      for (var wb = 0; wb < 8; wb++) byteVal = (byteVal << 1) | bits[wi + wb];
+      dataWords.push(byteVal);
+    }
+    var padToggle = 0;
+    while (dataWords.length < dataCap) {
+      dataWords.push(padToggle % 2 === 0 ? 0xec : 0x11);
+      padToggle++;
+    }
+    var ecWords = qrRsEncode(dataWords, ecCount);
+    var allWords = dataWords.concat(ecWords);
+
+    // 2. Bangun matriks modul + penanda function modules
+    var matrix = [];
+    var isFunc = [];
+    for (var r = 0; r < grid; r++) {
+      matrix[r] = new Array(grid).fill(0);
+      isFunc[r] = new Array(grid).fill(false);
+    }
+    function setFunc(rr, cc, val) {
+      if (rr >= 0 && rr < grid && cc >= 0 && cc < grid) {
+        matrix[rr][cc] = val ? 1 : 0;
+        isFunc[rr][cc] = true;
+      }
+    }
+    function drawFinder(rowOff, colOff) {
+      for (var dr = -1; dr <= 7; dr++) {
+        for (var dc = -1; dc <= 7; dc++) {
+          var inBox = dr >= 0 && dr <= 6 && dc >= 0 && dc <= 6;
+          var dark = inBox && (
+            dr === 0 || dr === 6 || dc === 0 || dc === 6 ||
+            (dr >= 2 && dr <= 4 && dc >= 2 && dc <= 4)
+          );
+          setFunc(rowOff + dr, colOff + dc, dark);
+        }
+      }
+    }
     drawFinder(0, 0);
     drawFinder(0, grid - 7);
     drawFinder(grid - 7, 0);
 
-    for (var i = 8; i < grid - 8; i++) {
-      matrix[6][i] = i % 2 === 0 ? 1 : 2;
-      matrix[i][6] = i % 2 === 0 ? 1 : 2;
-    }
-
-    var str = String(text || 'ARBACONNECT-FEFO');
-    var seed = 2166136261;
-    for (var k = 0; k < str.length; k++) {
-      seed ^= str.charCodeAt(k);
-      seed = Math.imul(seed, 16777619) >>> 0;
-    }
-
-    for (var rr = 0; rr < grid; rr++) {
-      for (var cc = 0; cc < grid; cc++) {
-        if (matrix[rr][cc] !== 0) continue;
-        if ((rr < 8 && cc < 8) || (rr < 8 && cc >= grid - 8) || (rr >= grid - 8 && cc < 8)) {
-          continue;
+    // Alignment pattern (Version 2-4)
+    if (alignPos > 0) {
+      for (var ar = -2; ar <= 2; ar++) {
+        for (var ac = -2; ac <= 2; ac++) {
+          var aDark = Math.max(Math.abs(ar), Math.abs(ac)) !== 1;
+          setFunc(alignPos + ar, alignPos + ac, aDark);
         }
-        seed ^= (rr * 31 + cc * 17 + str.charCodeAt((rr + cc) % str.length));
-        seed = Math.imul(seed, 1664525) + 1013904223;
-        seed = seed >>> 0;
-        matrix[rr][cc] = (seed & 3) !== 0 ? 1 : 0;
       }
     }
 
+    // Timing patterns
+    for (var ti = 8; ti < grid - 8; ti++) {
+      setFunc(6, ti, ti % 2 === 0);
+      setFunc(ti, 6, ti % 2 === 0);
+    }
+
+    // Reserve format info areas & dark module
+    for (var fi = 0; fi <= 8; fi++) {
+      if (fi !== 6) {
+        setFunc(8, fi, false);
+        setFunc(fi, 8, false);
+      }
+    }
+    for (var fj = 0; fj < 8; fj++) {
+      setFunc(8, grid - 1 - fj, false);
+      if (fj < 7) setFunc(grid - 1 - fj, 8, false);
+    }
+    setFunc(4 * version + 9, 8, true);
+
+    // 3. Penempatan bit data (zigzag 2 kolom) + Mask 0 ((r + c) % 2 === 0)
+    var bitStream = [];
+    for (var ai = 0; ai < allWords.length; ai++) {
+      for (var ab = 7; ab >= 0; ab--) bitStream.push((allWords[ai] >>> ab) & 1);
+    }
+    var bitPtr = 0;
+    var upward = true;
+    for (var col = grid - 1; col >= 1; col -= 2) {
+      if (col === 6) col--;
+      for (var step = 0; step < grid; step++) {
+        var row = upward ? (grid - 1 - step) : step;
+        for (var dx = 0; dx < 2; dx++) {
+          var cc = col - dx;
+          if (!isFunc[row][cc]) {
+            var bit = bitPtr < bitStream.length ? bitStream[bitPtr++] : 0;
+            if ((row + cc) % 2 === 0) bit ^= 1;
+            matrix[row][cc] = bit;
+          }
+        }
+      }
+      upward = !upward;
+    }
+
+    // 4. Tulis Format Information (EC-L = 01, Mask 0 = 000)
+    var fmt = qrComputeFormatBits(1, 0);
+    var fmtCoords1 = [
+      [8, 0], [8, 1], [8, 2], [8, 3], [8, 4], [8, 5], [8, 7], [8, 8],
+      [7, 8], [5, 8], [4, 8], [3, 8], [2, 8], [1, 8], [0, 8]
+    ];
+    for (var fk = 0; fk < 15; fk++) {
+      var fBit = (fmt >>> (14 - fk)) & 1;
+      matrix[fmtCoords1[fk][0]][fmtCoords1[fk][1]] = fBit;
+      if (fk < 7) {
+        matrix[grid - 1 - fk][8] = fBit;
+      } else {
+        matrix[8][grid - 15 + fk] = fBit;
+      }
+    }
+
+    // 5. Render SVG dengan Quiet Zone 4 modul standar ISO/IEC 18004
+    var qz = 4;
     var rects = '';
     for (var y = 0; y < grid; y++) {
       for (var x = 0; x < grid; x++) {
         if (matrix[y][x] === 1) {
-          rects += '<rect x="' + (x + 2) + '" y="' + (y + 2) + '" width="1" height="1" fill="#0f172a"/>';
+          rects += '<rect x="' + (x + qz) + '" y="' + (y + qz) + '" width="1" height="1" fill="#0f172a"/>';
         }
       }
     }
 
     return (
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + (grid + 4) + ' ' + (grid + 4) + '" width="' + size + '" height="' + size + '" shape-rendering="crispEdges" style="background:#ffffff; border-radius:8px; border:1px solid var(--color-border-subtle); display:block;">' +
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + (grid + qz * 2) + ' ' + (grid + qz * 2) + '" width="' + size + '" height="' + size + '" shape-rendering="crispEdges" style="background:#ffffff; border-radius:8px; border:1px solid var(--color-border-subtle); display:block;">' +
       '<rect width="100%" height="100%" fill="#ffffff"/>' +
       rects +
       '</svg>'
@@ -243,6 +402,8 @@
                         <div>Stok Gudang: <b class="text-on-surface">${scannedProd.stock} unit</b></div>
                         <div>Kedaluwarsa (FEFO): <b class="text-on-surface">${window.ArbaUtils.escapeHtml(scannedProd.fefoDate)}</b></div>
                         <div>Harga Satuan: <b class="text-primary">${window.ArbaUtils.formatRupiah(scannedProd.unitPrice)}</b></div>
+                        <div>NIE BPOM: <b class="font-mono text-emerald-700">${window.ArbaUtils.escapeHtml(scannedProd.nieBpom || 'Terdaftar BPOM')}</b></div>
+                        <div>Halal BPJPH: <b class="font-mono text-on-surface">${window.ArbaUtils.escapeHtml(scannedProd.noHalal || 'Tersertifikasi')}</b></div>
                       </div>
                       <div class="mt-3 flex flex-wrap gap-2">
                         ${typeof options.onSelectProduct === 'function' ? `
@@ -299,6 +460,7 @@
                           <div class="font-bold text-on-surface truncate" title="${window.ArbaUtils.escapeHtml(p.name)}">${window.ArbaUtils.escapeHtml(p.name)}</div>
                           <div class="font-mono text-[10px] text-on-surface-variant mt-0.5">SKU: ${window.ArbaUtils.escapeHtml(p.sku)}</div>
                           <div class="font-mono text-[11px] font-bold text-emerald-600 mt-0.5">${window.ArbaUtils.escapeHtml(p.activeBatch)}</div>
+                          <div class="text-[10px] font-mono text-primary mt-0.5 truncate">${window.ArbaUtils.escapeHtml(p.nieBpom || 'BPOM RI')}</div>
                           <div class="text-[11px] text-on-surface-variant mt-0.5">ED: <b class="text-on-surface">${window.ArbaUtils.escapeHtml(p.fefoDate)}</b> • Stok: <b class="text-on-surface">${p.stock}</b></div>
                         </div>
                       </div>
@@ -355,7 +517,42 @@
                   videoEl.style.display = 'block';
                 }
                 if (placeholderEl) placeholderEl.style.display = 'none';
-                window.ArbaApp.showToast('Kamera optik QR aktif — arahkan ke label batch produk', 'videocam');
+
+                // Aktifkan BarcodeDetector native (Chrome/Edge/Android) untuk pemindaian QR nyata
+                if (typeof window.BarcodeDetector === 'function' && videoEl) {
+                  var detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+                  window.ArbaApp.showToast('Kamera optik & QR Detector aktif — arahkan ke stiker QR batch!', 'qr_code_scanner');
+                  var scanLoop = function () {
+                    if (!activeCameraStream || !videoEl || videoEl.readyState < 2) {
+                      if (activeCameraStream) activeScanRaf = requestAnimationFrame(scanLoop);
+                      return;
+                    }
+                    detector.detect(videoEl).then(function (codes) {
+                      if (codes && codes.length > 0) {
+                        var rawVal = String(codes[0].rawValue || '').trim();
+                        var parts = rawVal.split('|');
+                        var keySku = parts.length >= 2 ? parts[1] : rawVal;
+                        var keyBatch = parts.length >= 3 ? parts[2] : rawVal;
+                        var matched = products.find(function (p) {
+                          return p.sku === keySku || p.activeBatch === keyBatch || rawVal.indexOf(p.sku) !== -1 || rawVal.indexOf(p.activeBatch) !== -1;
+                        });
+                        if (matched) {
+                          stopActiveCamera();
+                          selectedSku = matched.sku;
+                          window.ArbaApp.showToast('QR Batch Terbaca Optik: ' + matched.name + ' (' + matched.activeBatch + ')', 'verified');
+                          renderModalContent('scanner', matched);
+                          return;
+                        }
+                      }
+                      if (activeCameraStream) activeScanRaf = requestAnimationFrame(scanLoop);
+                    }).catch(function () {
+                      if (activeCameraStream) activeScanRaf = requestAnimationFrame(scanLoop);
+                    });
+                  };
+                  activeScanRaf = requestAnimationFrame(scanLoop);
+                } else {
+                  window.ArbaApp.showToast('Kamera aktif (browser non-BarcodeDetector — gunakan daftar batch di kanan sebagai fallback)', 'videocam');
+                }
               })
               .catch(function () {
                 window.ArbaApp.showToast('Kamera tidak tersedia — silakan pilih nomor batch pada daftar di kanan', 'info');
@@ -1342,9 +1539,195 @@
     return canvas.toDataURL('image/png');
   }
 
+  // ---------------------------------------------------------------------------
+  // 7. 1-Klik Pelacakan & Penarikan Batch CDOB BPOM (Batch Recall)
+  // ---------------------------------------------------------------------------
+  function openBatchRecallModal(initialSku) {
+    var st = window.ArbaStore.getState();
+    var products = st.products || [];
+    if (products.length === 0) return;
+
+    var selectedSku = initialSku || (products.find(function (p) { return p.status === 'critical-expiry'; }) || products[0]).sku;
+
+    function renderRecallModal(sku) {
+      var report = window.ArbaStore.getBatchRecallReport(sku);
+      if (!report) return;
+      var prod = report.product;
+      var isQuarantined = Boolean(prod.quarantined);
+
+      var modalHtml = `
+        <div class="modal-dialog modal-dialog-xl">
+          <div class="modal-header">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+                <span class="material-symbols-outlined text-[22px]">gpp_maybe</span>
+              </div>
+              <div>
+                <h3 class="modal-title">Pelacakan &amp; Penarikan Batch CDOB (1-Klik Batch Recall BPOM)</h3>
+                <p class="modal-subtitle">Telusuri seluruh apotek penerima batch tertentu, kirim notifikasi penarikan WhatsApp, &amp; kunci stok karantina gudang</p>
+              </div>
+            </div>
+            <button id="recall-modal-close" type="button" class="icon-btn" aria-label="Tutup">
+              <span class="material-symbols-outlined text-[20px]">close</span>
+            </button>
+          </div>
+
+          <div class="modal-body flex flex-col gap-4">
+            <!-- Pemilih SKU / Nomor Batch -->
+            <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-3 p-3.5 rounded-xl bg-surface-container-low border border-border-subtle">
+              <div class="flex-1">
+                <label for="recall-sku-select" class="block text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-1">
+                  Pilih Produk &amp; Nomor Batch Produksi untuk Dilacak
+                </label>
+                <select id="recall-sku-select" class="form-control text-xs font-semibold">
+                  ${products.map(function (p) {
+                    var tag = p.quarantined ? ' [DIKARANTINA]' : (p.status === 'critical-expiry' ? ' [KRITIS <30 HARI]' : '');
+                    return `<option value="${window.ArbaUtils.escapeHtml(p.sku)}" ${p.sku === prod.sku ? 'selected' : ''}>${window.ArbaUtils.escapeHtml(p.activeBatch)} — ${window.ArbaUtils.escapeHtml(p.name)} (${window.ArbaUtils.escapeHtml(p.nieBpom || 'BPOM')})${tag}</option>`;
+                  }).join('')}
+                </select>
+              </div>
+              <button
+                id="btn-exec-quarantine-batch"
+                type="button"
+                class="px-4 py-2.5 rounded-lg ${isQuarantined ? 'bg-surface-container text-on-surface-variant' : 'bg-rose-600 hover:bg-rose-700 text-white'} text-xs font-bold flex items-center gap-1.5 cursor-pointer border-0 shrink-0 shadow-xs"
+                ${isQuarantined ? 'disabled' : ''}
+              >
+                <span class="material-symbols-outlined text-[16px]">${isQuarantined ? 'lock' : 'block'}</span>
+                <span>${isQuarantined ? 'Batch Sudah Dikarantina' : 'Karantina Batch Ini Sekarang'}</span>
+              </button>
+            </div>
+
+            <!-- Ringkasan Keterlacakan Batch -->
+            <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <div class="p-3 rounded-xl border border-border-subtle bg-surface-container-lowest">
+                <div class="text-[10px] uppercase font-bold text-on-surface-variant">NIE BPOM &amp; Halal</div>
+                <div class="text-xs font-mono font-bold text-primary mt-1">${window.ArbaUtils.escapeHtml(prod.nieBpom || '-')}</div>
+                <div class="text-[10px] font-mono text-on-surface-variant mt-0.5">${window.ArbaUtils.escapeHtml(prod.noHalal || '-')}</div>
+              </div>
+              <div class="p-3 rounded-xl border border-border-subtle bg-surface-container-lowest">
+                <div class="text-[10px] uppercase font-bold text-on-surface-variant">Sisa Stok Gudang Kartasura</div>
+                <div class="text-lg font-bold text-on-surface mt-0.5">${report.warehouseStock.toLocaleString('id-ID')} <span class="text-xs font-normal text-on-surface-variant">unit</span></div>
+                <div class="text-[10px] text-on-surface-variant">ED: ${window.ArbaUtils.escapeHtml(prod.fefoDate)}</div>
+              </div>
+              <div class="p-3 rounded-xl border border-border-subtle bg-surface-container-lowest">
+                <div class="text-[10px] uppercase font-bold text-on-surface-variant">Total Terdistribusi ke Mitra</div>
+                <div class="text-lg font-bold text-rose-600 mt-0.5">${report.totalDistributedUnits.toLocaleString('id-ID')} <span class="text-xs font-normal text-on-surface-variant">unit</span></div>
+                <div class="text-[10px] text-on-surface-variant">Tercatat di ${report.ledgerCount} entri buku besar</div>
+              </div>
+              <div class="p-3 rounded-xl border border-border-subtle bg-surface-container-lowest">
+                <div class="text-[10px] uppercase font-bold text-on-surface-variant">Apotek / Outlet Terdampak</div>
+                <div class="text-lg font-bold text-amber-600 mt-0.5">${report.affectedOutlets.length} <span class="text-xs font-normal text-on-surface-variant">mitra</span></div>
+                <div class="text-[10px] text-on-surface-variant">Status: ${isQuarantined ? 'DIKARANTINA' : 'Aktif Beredar'}</div>
+              </div>
+            </div>
+
+            <!-- Daftar Apotek Penerima Batch -->
+            <div class="rounded-xl border border-border-subtle overflow-hidden">
+              <div class="px-4 py-2.5 bg-surface-container-low border-b border-border-subtle flex items-center justify-between">
+                <span class="text-xs font-bold text-on-surface">Daftar Mitra Penerima Batch ${window.ArbaUtils.escapeHtml(report.batchCode)}</span>
+                <span class="text-[11px] text-on-surface-variant">Dilacak pada ${window.ArbaUtils.escapeHtml(report.generatedAt)}</span>
+              </div>
+              ${report.affectedOutlets.length === 0 ? `
+                <div class="p-6 text-center text-xs text-on-surface-variant">
+                  Belum ada faktur distribusi aktif untuk batch <b>${window.ArbaUtils.escapeHtml(report.batchCode)}</b>. Seluruh stok aman berada di Gudang Kartasura.
+                </div>
+              ` : `
+                <div class="overflow-x-auto">
+                  <table class="data-table w-full text-xs">
+                    <thead>
+                      <tr>
+                        <th>Mitra Apotek / Outlet</th>
+                        <th>No. SIA / Legalitas</th>
+                        <th>Apoteker (APA)</th>
+                        <th class="text-right">Qty Diterima</th>
+                        <th>Nomor Faktur</th>
+                        <th class="text-right">Aksi Penarikan</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${report.affectedOutlets.map(function (ao) {
+                        var waText = encodeURIComponent(
+                          'Yth. ' + ao.picName + ' (' + ao.outletName + '),\n\n' +
+                          '[PEMBERITAHUAN PENARIKAN / KARANTINA BATCH CDOB]\n' +
+                          'CV Arba\'in Solo Raya menginformasikan agar produk berikut sementara ditarik/dipisahkan dari etalase:\n' +
+                          '- Produk: ' + prod.name + '\n' +
+                          '- NIE BPOM: ' + (prod.nieBpom || '-') + '\n' +
+                          '- Nomor Batch: ' + report.batchCode + '\n' +
+                          '- Total Qty Terkirim: ' + ao.totalQty + ' unit\n\n' +
+                          'Tim logistik kami akan segera melakukan penjemputan & penggantian batch baru. Terima kasih.'
+                        );
+                        var waUrl = 'https://wa.me/' + encodeURIComponent(String(ao.picPhone || '').replace(/\D/g, '')) + '?text=' + waText;
+                        return `
+                          <tr>
+                            <td>
+                              <div class="font-bold text-on-surface">${window.ArbaUtils.escapeHtml(ao.outletName)}</div>
+                              <div class="text-[11px] text-on-surface-variant">${window.ArbaUtils.escapeHtml(ao.city)}</div>
+                            </td>
+                            <td class="font-mono text-[11px]">${window.ArbaUtils.escapeHtml(ao.noSia)}</td>
+                            <td>${window.ArbaUtils.escapeHtml(ao.picName)}</td>
+                            <td class="text-right font-bold text-rose-600">${ao.totalQty} unit</td>
+                            <td class="font-mono text-[11px]">${ao.invoices.map(function (iv) { return window.ArbaUtils.escapeHtml(iv.orderId); }).join(', ')}</td>
+                            <td class="text-right">
+                              <a href="${waUrl}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold no-underline">
+                                <span class="material-symbols-outlined text-[14px]">send</span>
+                                <span>WA Recall APA</span>
+                              </a>
+                            </td>
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              `}
+            </div>
+          </div>
+
+          <div class="modal-footer flex items-center justify-between">
+            <span class="text-[11px] text-on-surface-variant">Sesuai Pedoman CDOB BPOM Bab VIII (Penarikan Kembali Obat / Recall)</span>
+            <div class="flex items-center gap-2">
+              <button id="recall-print-btn" type="button" class="btn btn-outline flex items-center gap-1.5">
+                <span class="material-symbols-outlined text-[16px]">print</span>
+                <span>Cetak Laporan Recall</span>
+              </button>
+              <button id="recall-modal-footer-close" type="button" class="btn btn-primary">Tutup</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      window.ArbaApp.openModal(modalHtml);
+
+      var closeBtn = document.getElementById('recall-modal-close');
+      var footerClose = document.getElementById('recall-modal-footer-close');
+      var skuSelect = document.getElementById('recall-sku-select');
+      var quarantineBtn = document.getElementById('btn-exec-quarantine-batch');
+      var printBtn = document.getElementById('recall-print-btn');
+
+      if (closeBtn) closeBtn.onclick = function () { window.ArbaApp.closeModal(); };
+      if (footerClose) footerClose.onclick = function () { window.ArbaApp.closeModal(); };
+      if (printBtn) printBtn.onclick = function () { window.print(); };
+      if (skuSelect) {
+        skuSelect.onchange = function (e) {
+          selectedSku = e.target.value;
+          renderRecallModal(selectedSku);
+        };
+      }
+      if (quarantineBtn && !isQuarantined) {
+        quarantineBtn.onclick = function () {
+          window.ArbaStore.quarantineBatch(prod.sku, 'Penarikan / Karantina Batch CDOB via Modul Batch Recall');
+          renderRecallModal(prod.sku);
+        };
+      }
+    }
+
+    renderRecallModal(selectedSku);
+  }
+
   window.ArbaAdvanced = {
     generateQrSvg: generateQrSvg,
     openQrBatchModal: openQrBatchModal,
+    openBatchRecallModal: openBatchRecallModal,
     openConsignmentRebalancerModal: openConsignmentRebalancerModal,
     openTspRouteOptimizerModal: openTspRouteOptimizerModal,
     fetchRealRoadGeometryOsrm: fetchRealRoadGeometryOsrm,

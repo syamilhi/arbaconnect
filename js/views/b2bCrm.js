@@ -726,6 +726,24 @@
                       ${window.ArbaUtils.escapeHtml(selectedOutlet.salesRep)} (${window.ArbaUtils.escapeHtml(selectedOutlet.salesArea)})
                     </span>
                   </div>
+                  ${selectedOutlet.noSia ? `
+                    <div class="flex flex-col gap-1 pt-1.5 border-t border-border-subtle/30 text-[11px]">
+                      <div class="flex items-center justify-between">
+                        <span class="text-on-surface-variant">No. SIA / NIB:</span>
+                        <span class="font-mono font-semibold text-on-surface">${window.ArbaUtils.escapeHtml(selectedOutlet.noSia)}</span>
+                      </div>
+                      <div class="flex items-center justify-between">
+                        <span class="text-on-surface-variant">No. SIPA APA:</span>
+                        <span class="font-mono font-semibold text-primary">${window.ArbaUtils.escapeHtml(selectedOutlet.noSipa || '-')}</span>
+                      </div>
+                      <div class="flex items-center justify-between">
+                        <span class="text-on-surface-variant">Status Legalitas CDOB:</span>
+                        <span class="px-1.5 py-0.2 rounded text-[10px] font-bold ${selectedOutlet.sipaStatus === 'Aktif' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}">
+                          ${window.ArbaUtils.escapeHtml(selectedOutlet.sipaStatus || 'Aktif')} (${window.ArbaUtils.escapeHtml(selectedOutlet.sipaExpiry || '-')})
+                        </span>
+                      </div>
+                    </div>
+                  ` : ''}
                 </div>
 
                 <!-- Rincian Inventaris Konsinyasi Mitra -->

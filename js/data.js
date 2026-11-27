@@ -4,12 +4,27 @@
  */
 
 window.ArbaData = (function() {
+  // Helper tanggal FEFO dinamis agar status masa edar selalu akurat pada hari demo
+  const MONTHS_ID = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+  function makeFefoMeta(daysFromNow) {
+    const dt = new Date(Date.now() + daysFromNow * 24 * 60 * 60 * 1000);
+    const iso = dt.toISOString().slice(0, 10);
+    const label = `${String(dt.getDate()).padStart(2, '0')} ${MONTHS_ID[dt.getMonth()]} ${dt.getFullYear()}`;
+    let fefoStatus = 'Aman (>6 Bulan)';
+    if (daysFromNow <= 30) fefoStatus = 'Kritis (<30 Hari)';
+    else if (daysFromNow <= 90) fefoStatus = 'Mendekati ED (<3 Bulan)';
+    return { fefoDate: label, fefoIsoDate: iso, fefoDaysLeft: daysFromNow, fefoStatus };
+  }
+
   const products = [
     {
       sku: 'SKU-ARB-MDR500',
       name: "Madu Randu Murni Arba'in 500g",
       category: 'Madu Herbal',
       division: 'Madu & Herbal',
+      nieBpom: 'BPOM RI MD 152111001248',
+      noHalal: 'ID33110000184210821',
+      storageTemp: '15–25°C (Kering)',
       stock: 1420,
       safetyStock: 180,
       rop: 320,
@@ -18,8 +33,7 @@ window.ArbaData = (function() {
       monthlySoldUnits: 3840,
       forecastNextMonthUnits: 4200,
       activeBatch: 'BATCH-2026-018',
-      fefoDate: '18 Okt 2027',
-      fefoStatus: 'Aman (>6 Bulan)',
+      ...makeFefoMeta(410),
       status: 'optimal',
       unitPrice: 65000,
       icon: 'nutrition'
@@ -29,6 +43,9 @@ window.ArbaData = (function() {
       name: "Madu Rambutan Murni Arba'in 500g",
       category: 'Madu Herbal',
       division: 'Madu & Herbal',
+      nieBpom: 'BPOM RI MD 152111002248',
+      noHalal: 'ID33110000184220821',
+      storageTemp: '15–25°C (Kering)',
       stock: 145,
       safetyStock: 90,
       rop: 160,
@@ -37,8 +54,7 @@ window.ArbaData = (function() {
       monthlySoldUnits: 1920,
       forecastNextMonthUnits: 2150,
       activeBatch: 'BATCH-2026-029',
-      fefoDate: '14 Sep 2027',
-      fefoStatus: 'Aman (>6 Bulan)',
+      ...makeFefoMeta(380),
       status: 'below-rop',
       unitPrice: 68000,
       icon: 'nutrition'
@@ -48,6 +64,9 @@ window.ArbaData = (function() {
       name: 'Habbatussauda Oil Softgel 100s',
       category: 'Kapsul Herbal',
       division: 'Madu & Herbal',
+      nieBpom: 'POM TR 193326451',
+      noHalal: 'ID33110000184230821',
+      storageTemp: '15–25°C (Terlindung Cahaya)',
       stock: 98,
       safetyStock: 120,
       rop: 225,
@@ -56,8 +75,7 @@ window.ArbaData = (function() {
       monthlySoldUnits: 1450,
       forecastNextMonthUnits: 1650,
       activeBatch: 'BATCH-2025-084',
-      fefoDate: '12 Mei 2026',
-      fefoStatus: 'Mendekati ED (<3 Bulan)',
+      ...makeFefoMeta(62),
       status: 'below-rop',
       unitPrice: 95000,
       icon: 'vaccines'
@@ -67,6 +85,9 @@ window.ArbaData = (function() {
       name: 'Sari Kurma Plus Propolis 350g',
       category: 'Minyak & Cairan',
       division: 'Madu & Herbal',
+      nieBpom: 'BPOM RI MD 866611005248',
+      noHalal: 'ID33110000184240821',
+      storageTemp: '15–25°C (Kering)',
       stock: 840,
       safetyStock: 90,
       rop: 160,
@@ -75,8 +96,7 @@ window.ArbaData = (function() {
       monthlySoldUnits: 1120,
       forecastNextMonthUnits: 1300,
       activeBatch: 'BATCH-2026-031',
-      fefoDate: '30 Nov 2027',
-      fefoStatus: 'Aman (>6 Bulan)',
+      ...makeFefoMeta(445),
       status: 'optimal',
       unitPrice: 59000,
       icon: 'water_drop'
@@ -86,6 +106,9 @@ window.ArbaData = (function() {
       name: 'Minyak Zaitun Extra Virgin 250ml',
       category: 'Minyak & Cairan',
       division: 'Kosmetik & Perawatan',
+      nieBpom: 'POM TR 203641892',
+      noHalal: 'ID33110000184250821',
+      storageTemp: '15–25°C (Botol Gelap)',
       stock: 112,
       safetyStock: 80,
       rop: 140,
@@ -94,8 +117,7 @@ window.ArbaData = (function() {
       monthlySoldUnits: 980,
       forecastNextMonthUnits: 1100,
       activeBatch: 'BATCH-2024-009',
-      fefoDate: '14 Mar 2026',
-      fefoStatus: 'Kritis (<30 Hari)',
+      ...makeFefoMeta(18),
       status: 'critical-expiry',
       unitPrice: 50000,
       icon: 'warning'
@@ -105,6 +127,9 @@ window.ArbaData = (function() {
       name: 'Kapsul Temulawak Ekstrak',
       category: 'Kapsul Herbal',
       division: 'Madu & Herbal',
+      nieBpom: 'POM TR 183319204',
+      noHalal: 'ID33110000184260821',
+      storageTemp: '15–25°C (Kering)',
       stock: 650,
       safetyStock: 100,
       rop: 175,
@@ -113,8 +138,7 @@ window.ArbaData = (function() {
       monthlySoldUnits: 860,
       forecastNextMonthUnits: 950,
       activeBatch: 'BATCH-2026-044',
-      fefoDate: '19 Des 2027',
-      fefoStatus: 'Aman (>6 Bulan)',
+      ...makeFefoMeta(470),
       status: 'optimal',
       unitPrice: 48000,
       icon: 'pill'
@@ -124,6 +148,9 @@ window.ArbaData = (function() {
       name: "Madu Multiflora Arba'in 1kg",
       category: 'Madu Herbal',
       division: 'Madu & Herbal',
+      nieBpom: 'BPOM RI MD 152111003248',
+      noHalal: 'ID33110000184270821',
+      storageTemp: '15–25°C (Kering)',
       stock: 430,
       safetyStock: 80,
       rop: 150,
@@ -132,8 +159,7 @@ window.ArbaData = (function() {
       monthlySoldUnits: 1540,
       forecastNextMonthUnits: 1700,
       activeBatch: 'BATCH-2026-022',
-      fefoDate: '15 Jan 2028',
-      fefoStatus: 'Aman (>6 Bulan)',
+      ...makeFefoMeta(500),
       status: 'optimal',
       unitPrice: 115000,
       icon: 'nutrition'
@@ -143,6 +169,9 @@ window.ArbaData = (function() {
       name: 'Madu Hutan Liar Murni 500g',
       category: 'Madu Herbal',
       division: 'Madu & Herbal',
+      nieBpom: 'BPOM RI MD 152111004248',
+      noHalal: 'ID33110000184280821',
+      storageTemp: '15–25°C (Kering)',
       stock: 25,
       safetyStock: 40,
       rop: 70,
@@ -151,8 +180,7 @@ window.ArbaData = (function() {
       monthlySoldUnits: 1180,
       forecastNextMonthUnits: 1350,
       activeBatch: 'BATCH-2025-110',
-      fefoDate: '20 Jul 2026',
-      fefoStatus: 'Mendekati ED (<3 Bulan)',
+      ...makeFefoMeta(74),
       status: 'below-rop',
       unitPrice: 85000,
       icon: 'nutrition'
@@ -162,6 +190,9 @@ window.ArbaData = (function() {
       name: "Sabun Wajah Herbal Zaitun & Madu Arba'in 80g",
       category: 'Kosmetik Herbal',
       division: 'Kosmetik & Perawatan',
+      nieBpom: 'BPOM NA 18231204195',
+      noHalal: 'ID33110000184290821',
+      storageTemp: '15–30°C (Kering)',
       stock: 520,
       safetyStock: 100,
       rop: 180,
@@ -170,8 +201,7 @@ window.ArbaData = (function() {
       monthlySoldUnits: 1320,
       forecastNextMonthUnits: 1500,
       activeBatch: 'BATCH-2026-052',
-      fefoDate: '10 Nov 2027',
-      fefoStatus: 'Aman (>6 Bulan)',
+      ...makeFefoMeta(430),
       status: 'optimal',
       unitPrice: 32000,
       icon: 'spa'
@@ -539,6 +569,30 @@ window.ArbaData = (function() {
       visitNotes: '"Pesanan 50 botol Madu Multiflora 1kg disetujui & siap dikirim logistik."'
     }
   ];
+
+  // Enrich seluruh mitra B2B dengan legalitas SIA/SIPA Apotek (CDOB BPOM) / NIB Ritel
+  const legalMetaByOutlet = {
+    'AP-SLO-001': { noSia: 'SIA/3372/2024/0148', noSipa: 'SIPA/3372/2024/0891', sipaExpiry: '18 Okt 2028', sipaStatus: 'Aktif' },
+    'AP-SLO-002': { noSia: 'SIA/3372/2024/0205', noSipa: 'SIPA/3372/2024/0912', sipaExpiry: '22 Des 2028', sipaStatus: 'Aktif' },
+    'MM-SKH-014': { noSia: 'NIB-0220101841923', noSipa: 'Ritel Non-Apotek (PIRT/MD)', sipaExpiry: 'Berlaku Permanen', sipaStatus: 'Aktif' },
+    'MM-SLO-009': { noSia: 'NIB-0220101845501', noSipa: 'Ritel Non-Apotek (PIRT/MD)', sipaExpiry: 'Berlaku Permanen', sipaStatus: 'Aktif' },
+    'AP-KRA-023': { noSia: 'SIA/3313/2023/0074', noSipa: 'SIPA/3313/2023/0419', sipaExpiry: '14 Agu 2027', sipaStatus: 'Aktif' },
+    'AP-KRA-004': { noSia: 'SIA/3313/2024/0112', noSipa: 'SIPA/3313/2024/0533', sipaExpiry: '05 Nov 2028', sipaStatus: 'Aktif' },
+    'AP-BYL-008': { noSia: 'SIA/3309/2024/0068', noSipa: 'SIPA/3309/2024/0314', sipaExpiry: '30 Sep 2028', sipaStatus: 'Aktif' },
+    'MM-BYL-003': { noSia: 'NIB-0220101849912', noSipa: 'Ritel Non-Apotek (PIRT/MD)', sipaExpiry: 'Berlaku Permanen', sipaStatus: 'Aktif' },
+    'MM-KLT-005': { noSia: 'NIB-0220101847710', noSipa: 'Ritel Non-Apotek (PIRT/MD)', sipaExpiry: 'Berlaku Permanen', sipaStatus: 'Aktif' },
+    'AP-SRG-019': { noSia: 'SIA/3314/2021/0041', noSipa: 'SIPA/3314/2021/0209', sipaExpiry: '15 Des 2026', sipaStatus: 'Segera Habis' },
+    'AP-KRA-078': { noSia: 'SIA/3313/2024/0189', noSipa: 'SIPA/3313/2024/0622', sipaExpiry: '11 Jan 2029', sipaStatus: 'Aktif' }
+  };
+  outlets.forEach(function (o) {
+    const lm = legalMetaByOutlet[o.id];
+    if (lm) {
+      o.noSia = lm.noSia;
+      o.noSipa = lm.noSipa;
+      o.sipaExpiry = lm.sipaExpiry;
+      o.sipaStatus = lm.sipaStatus;
+    }
+  });
 
   const orders = [
     {
