@@ -113,13 +113,14 @@
     var isCreditTerm = /Net|Jatuh Tempo/i.test(state.selectedTerm);
     var overCredit = isCreditTerm && totalAmount > (currentOutlet.creditRemaining || 0);
     var isSuperAdminUser = appState.currentUser && appState.currentUser.role === 'super-admin';
+    var canToggleFullscreen = isSuperAdminUser || isFieldSalesRole;
     var wrapperEl = document.querySelector('.app-wrapper');
     var isFullscreenMode = Boolean(wrapperEl && wrapperEl.classList.contains('pwa-mobile-only'));
 
     var html = `
-      <div class="flex flex-col items-center w-full pb-12">
-        ${isSuperAdminUser && !isFullscreenMode ? `
-          <!-- Viewport Control Bar (Khusus Super Admin) -->
+      <div class="flex flex-col items-center w-full ${isFullscreenMode ? '' : 'pb-12'}">
+        ${canToggleFullscreen && !isFullscreenMode ? `
+          <!-- Viewport Control Bar (Super Admin & Sales Lapangan) -->
           <div class="w-full max-w-[420px] flex items-center justify-between mb-3 bg-surface-container-lowest p-2.5 rounded-xl border border-border-subtle/50 text-xs text-on-surface-variant">
             <div class="flex items-center gap-1.5">
               <span class="material-symbols-outlined text-primary text-[18px]">smartphone</span>
@@ -139,11 +140,11 @@
         <!-- Field Sales Main Application Container -->
         <div
           id="field-sales-pwa-preview"
-          class="w-full transition-all duration-200 max-w-[420px] rounded-3xl border border-border-subtle/70 bg-surface shadow-xl overflow-hidden"
-          style="max-width: 420px; border-radius: 28px;"
+          class="w-full transition-all duration-200 max-w-[420px] bg-surface overflow-hidden ${isFullscreenMode ? 'min-h-screen' : 'rounded-3xl border border-border-subtle/70 shadow-xl'}"
+          style="max-width: 420px;${isFullscreenMode ? ' min-height: 100vh;' : ' border-radius: 28px;'}"
         >
           <!-- App Frame -->
-          <div class="pwa-app-frame flex flex-col min-h-[680px] bg-white text-slate-900 relative rounded-2xl overflow-hidden" style="position:relative; background:#fff; min-height:680px;">
+          <div class="pwa-app-frame flex flex-col ${isFullscreenMode ? 'min-h-screen' : 'min-h-[680px] rounded-2xl'} bg-white text-slate-900 relative overflow-hidden" style="position:relative; background:#fff; min-height:${isFullscreenMode ? '100vh' : '680px'};">
             <!-- Top Bar - Sales Profile & Sync Status -->
             <div class="bg-[#005c55] text-white px-4 py-3 sticky top-0 z-30 shadow-xs flex items-center justify-between" style="background:#005c55; color:#fff;">
               <div class="flex items-center gap-2.5 min-w-0">

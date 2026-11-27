@@ -663,11 +663,19 @@ html.dark .app-header {
 }
 
 .app-wrapper.pwa-mobile-only .main-view-container {
-  padding: 1rem !important;
+  padding: 0 !important;
   display: flex;
   justify-content: center;
   align-items: flex-start;
   min-height: 100vh;
+}
+
+.app-wrapper.pwa-mobile-only #field-sales-pwa-preview,
+.app-wrapper.pwa-mobile-only .pwa-app-frame {
+  border-radius: 0 !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  min-height: 100vh !important;
 }
 
 /* PWA Install Header Button & Floating Mobile Install Banner */

@@ -268,9 +268,6 @@
             </div>
 
             <h1 style="font-size:21px; font-weight:800; color:#0f172a; margin:0 0 6px 0;">Masuk ke Akun Anda</h1>
-            <p style="font-size:12.5px; color:#64748b; margin:0 0 22px 0; line-height:1.5;">
-              Masukkan username atau email resmi CV Arba'in beserta kata sandi Anda untuk mengakses sistem.
-            </p>
 
             <!-- Error Alert -->
             <div id="auth-error-msg" style="display:none; padding:11px 13px; border-radius:10px; background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; font-size:12px; font-weight:600; margin-bottom:16px;"></div>
@@ -465,9 +462,9 @@
           </div>
           <div class="flex flex-wrap gap-2">
             ${allowedPaths.map(function (pathKey) {
-              var m = MODULE_LABELS[pathKey];
-              if (!m) return '';
-              return `
+      var m = MODULE_LABELS[pathKey];
+      if (!m) return '';
+      return `
                 <button
                   type="button"
                   class="profile-nav-chip flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all bg-surface-container-low hover:bg-primary hover:text-white text-on-surface cursor-pointer border border-border-subtle"
@@ -477,7 +474,7 @@
                   <span>${m.name}</span>
                 </button>
               `;
-            }).join('')}
+    }).join('')}
           </div>
         </div>
 
