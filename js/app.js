@@ -13,7 +13,7 @@
       if (typeof window !== 'undefined' && 'caches' in window) {
         window.caches.keys().then(function (keys) {
           keys.forEach(function (k) {
-            if (k.indexOf('arbaconnect-pwa-') === 0 && k !== 'arbaconnect-pwa-v25') {
+            if (k.indexOf('arbaconnect-pwa-') === 0 && k !== 'arbaconnect-pwa-v26') {
               window.caches.delete(k);
             }
           });
@@ -248,6 +248,14 @@
     // Header interaction handling
     bindHeader: function () {
       var self = this;
+
+      // Mobile header hamburger toggle button -> toggle sidebar drawer on mobile
+      var mobileMenuBtn = document.getElementById('mobile-menu-toggle-btn');
+      if (mobileMenuBtn) {
+        mobileMenuBtn.addEventListener('click', function () {
+          window.ArbaStore.toggleSidebar();
+        });
+      }
 
       // Brand Logo click -> Navigate to user's default permitted page
       var brand = document.getElementById('header-brand-logo');

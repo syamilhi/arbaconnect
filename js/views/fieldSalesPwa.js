@@ -143,7 +143,7 @@
           style="max-width: 420px; border-radius: 28px;"
         >
           <!-- App Frame -->
-          <div class="flex flex-col min-h-[680px] bg-white text-slate-900 relative rounded-2xl overflow-hidden" style="position:relative; background:#fff; min-height:680px;">
+          <div class="pwa-app-frame flex flex-col min-h-[680px] bg-white text-slate-900 relative rounded-2xl overflow-hidden" style="position:relative; background:#fff; min-height:680px;">
             <!-- Top Bar - Sales Profile & Sync Status -->
             <div class="bg-[#005c55] text-white px-4 py-3 sticky top-0 z-30 shadow-xs flex items-center justify-between" style="background:#005c55; color:#fff;">
               <div class="flex items-center gap-2.5 min-w-0">
@@ -207,13 +207,13 @@
             </div>
 
             <!-- Daily Target Progress Strip (live dari log kunjungan) -->
-            <div class="px-4 py-2 flex items-center justify-between text-[11px]" style="background:#e6f4f2; color:#004d47; padding:0.45rem 1rem; border-bottom:1px solid #cce7e3;">
-              <span class="flex items-center gap-1">
-                <span class="material-symbols-outlined text-[14px]">directions_walk</span>
-                Kunjungan hari ini: <b>${repPerf.visitsToday}/${repPerf.dailyVisitTarget}</b>
+            <div class="pwa-kpi-strip px-4 py-2 flex items-center justify-between gap-2 text-[11px]" style="background:#e6f4f2; color:#004d47; padding:0.45rem 1rem; border-bottom:1px solid #cce7e3;">
+              <span class="flex items-center gap-1 whitespace-nowrap">
+                <span class="material-symbols-outlined text-[14px]" aria-hidden="true">directions_walk</span>
+                <span>Kunjungan: <b>${repPerf.visitsToday}/${repPerf.dailyVisitTarget}</b></span>
               </span>
-              <span>Order: <b>${repPerf.ordersToday}</b></span>
-              <span>Omset: <b>${repPerf.revenuePct}%</b> target</span>
+              <span class="whitespace-nowrap">Order: <b>${repPerf.ordersToday}</b></span>
+              <span class="whitespace-nowrap">Omset: <b>${repPerf.revenuePct}%</b></span>
             </div>
 
             ${(!isOnline || offlineQueue.length > 0) ? `
@@ -269,7 +269,7 @@
             </div>
 
             <!-- Main App Body -->
-            <div class="flex-1 p-3.5 space-y-3 pb-24" style="padding: 0.875rem; padding-bottom: 6rem;">
+            <div class="pwa-app-body flex-1 p-3.5 space-y-3 pb-24" style="padding: 0.875rem; padding-bottom: 6rem;">
               ${state.activePwaTab === 'outlet' ? `
               <!-- Tab 1: Outdoor GPS Check-In & Outlet Card -->
               <div class="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-2.5 mb-3" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:0.75rem;">

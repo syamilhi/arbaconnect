@@ -1,10 +1,19 @@
 /* ArbaConnect ERP - Application Shell & Layout System */
 
+html,
+body {
+  overflow-x: clip;
+  max-width: 100%;
+}
+
 .app-wrapper {
   min-height: 100vh;
   background-color: var(--color-surface);
   display: flex;
   flex-direction: column;
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: clip;
 }
 
 /* Header Bar */
@@ -23,7 +32,31 @@
   align-items: center;
   padding: 0 var(--gutter-desktop);
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.75rem;
+  max-width: 100vw;
+  box-sizing: border-box;
+}
+
+.header-left-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.mobile-menu-btn {
+  display: none;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-subtle);
+  background-color: var(--color-surface-container-low);
+  color: var(--color-on-surface);
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
 html.dark .app-header {
@@ -754,5 +787,167 @@ html.dark .app-header {
 @media (max-width: 480px) {
   .pwa-install-header-btn {
     padding: 0.35rem 0.45rem;
+  }
+}
+
+/* =========================================================================
+   Full Mobile Device Responsive Layout (< 768px)
+   Mencegah header terpotong, menyembunyikan sidebar menjadi off-canvas drawer,
+   dan membuat konten & Field Sales PWA tampil 100% penuh sesuai layar HP.
+   ========================================================================= */
+@media (max-width: 767px) {
+  .app-header {
+    height: 56px;
+    padding: 0 0.65rem;
+    gap: 0.35rem;
+  }
+
+  .mobile-menu-btn {
+    display: inline-flex;
+  }
+
+  .header-brand {
+    gap: 0.45rem;
+    min-width: 0;
+    flex-shrink: 1;
+  }
+
+  .header-brand svg {
+    width: 28px;
+    height: 28px;
+  }
+
+  .header-brand-text {
+    min-width: 0;
+  }
+
+  .brand-title {
+    font-size: 0.88rem;
+    white-space: nowrap;
+  }
+
+  .brand-subtitle {
+    display: none;
+  }
+
+  .header-actions {
+    gap: 0.25rem;
+    flex-shrink: 0;
+  }
+
+  .role-switcher-container {
+    display: none !important;
+  }
+
+  #header-fullscreen-btn {
+    display: none !important;
+  }
+
+  .online-toggle-btn {
+    padding: 0.3rem 0.45rem;
+    min-width: 28px;
+    justify-content: center;
+  }
+
+  .icon-btn {
+    width: 30px;
+    height: 30px;
+  }
+
+  #header-profile-pill {
+    padding-left: 0.35rem !important;
+    gap: 0 !important;
+  }
+
+  #header-profile-avatar {
+    width: 28px !important;
+    height: 28px !important;
+    font-size: 11px !important;
+  }
+
+  .notification-menu {
+    position: fixed;
+    top: 60px;
+    left: 0.75rem;
+    right: 0.75rem;
+    width: auto;
+    max-width: calc(100vw - 1.5rem);
+  }
+
+  /* Sidebar menjadi off-canvas slide-in drawer di HP agar tidak memakan 64px layar */
+  .app-sidebar {
+    top: 56px;
+    transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1), width 0.22s ease;
+  }
+
+  .app-sidebar.collapsed {
+    transform: translateX(-100%);
+    width: 256px;
+    pointer-events: none;
+  }
+
+  .app-sidebar.expanded {
+    transform: translateX(0);
+    width: 256px;
+    max-width: 82vw;
+    pointer-events: auto;
+  }
+
+  .sidebar-backdrop {
+    top: 56px;
+  }
+
+  .app-content-wrapper,
+  .app-content-wrapper.sidebar-open {
+    padding-left: 0 !important;
+    width: 100%;
+    max-width: 100vw;
+  }
+
+  .main-view-container {
+    padding: 0.75rem;
+    padding-top: calc(56px + 0.75rem);
+    min-height: calc(100vh - 56px);
+  }
+
+  /* Field Sales PWA tampil 100% penuh di layar HP tanpa bingkai kaku 420px */
+  #field-sales-pwa-preview {
+    max-width: 100% !important;
+    width: 100% !important;
+    border-radius: 16px !important;
+    border-width: 1px !important;
+  }
+
+  .pwa-app-frame {
+    min-height: calc(100vh - 80px) !important;
+    border-radius: 16px !important;
+  }
+
+  .pwa-app-body {
+    max-height: none !important;
+    overflow-y: visible !important;
+    padding: 0.75rem !important;
+    padding-bottom: 5.5rem !important;
+  }
+
+  .pwa-kpi-strip {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 0.35rem !important;
+    padding: 0.5rem 0.65rem !important;
+    text-align: center;
+  }
+
+  .pwa-kpi-strip > span {
+    justify-content: center;
+    flex-direction: column;
+    gap: 0.1rem;
+    line-height: 1.2;
+  }
+
+  .app-footer {
+    padding: 0.75rem;
+    text-align: center;
+    align-items: center;
   }
 }
