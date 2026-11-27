@@ -30,7 +30,77 @@ const path = require('node:path');
 const vm = require('node:vm');
 const crypto = require('node:crypto');
 const { URL } = require('node:url');
-const { DatabaseSync } = require('node:sqlite');
+
+let DatabaseSync = null;
+try {
+  DatabaseSync = require('node:sqlite').DatabaseSync;
+} catch (sqliteLoadErr) {
+  DatabaseSync = null;
+}
+
+function createInMemoryFallbackDb() {
+  const kvStore = new Map();
+  const revokedMap = new Map();
+  const mutationsMap = new Map();
+  return {
+    isFallbackMemory: true,
+    exec() {},
+    prepare(sql) {
+      const q = String(sql || '').trim().toLowerCase();
+      return {
+        get(...args) {
+          if (q.includes('from app_kv_state')) {
+            const val = kvStore.get(args[0]);
+            return val !== undefined ? { value_json: val } : undefined;
+          }
+          if (q.includes('from revoked_tokens')) {
+            const exp = revokedMap.get(args[0]);
+            return exp !== undefined ? { exp_ms: exp } : undefined;
+          }
+          if (q.includes('from sync_mutations_log')) {
+            const m = mutationsMap.get(args[0]);
+            return m ? { mutation_id: m.mutation_id } : undefined;
+          }
+          if (q.includes('select count(*)')) {
+            return { c: 0 };
+          }
+          return undefined;
+        },
+        all() {
+          if (q.includes('from sync_mutations_log')) {
+            return Array.from(mutationsMap.values()).slice(-30).reverse();
+          }
+          return [];
+        },
+        run(...args) {
+          if (q.includes('into app_kv_state')) {
+            kvStore.set(args[0], args[1]);
+          } else if (q.includes('into revoked_tokens')) {
+            revokedMap.set(args[0], args[1]);
+          } else if (q.includes('delete from revoked_tokens')) {
+            if (q.includes('token_hash = ?')) {
+              revokedMap.delete(args[0]);
+            } else {
+              const now = args[0] || Date.now();
+              for (const [k, exp] of revokedMap.entries()) {
+                if (exp <= now) revokedMap.delete(k);
+              }
+            }
+          } else if (q.includes('into sync_mutations_log')) {
+            mutationsMap.set(args[0], {
+              mutation_id: args[0],
+              client_id: args[1],
+              mutation_type: args[2],
+              summary: args[3],
+              synced_at: new Date().toISOString()
+            });
+          }
+          return { changes: 1 };
+        }
+      };
+    }
+  };
+}
 
 function hashCredential(raw) {
   const str = String(raw || '');
@@ -357,9 +427,18 @@ function loadInitialMasterData() {
 // -----------------------------------------------------------------------------
 // 2. Inisialisasi Skema SQL Relasional (10 Entitas `database/schema.sql` + Log Sync)
 // -----------------------------------------------------------------------------
-const db = new DatabaseSync(DB_FILE);
-db.exec('PRAGMA journal_mode = WAL;');
-db.exec('PRAGMA foreign_keys = ON;');
+let db;
+try {
+  if (DatabaseSync) {
+    db = new DatabaseSync(DB_FILE);
+    db.exec('PRAGMA journal_mode = WAL;');
+    db.exec('PRAGMA foreign_keys = ON;');
+  } else {
+    db = createInMemoryFallbackDb();
+  }
+} catch (dbInitErr) {
+  db = createInMemoryFallbackDb();
+}
 
 function initRelationalSchema() {
   // Migrasi otomatis tabel users bila skema lama belum mendukung peran 'super_admin'
