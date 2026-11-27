@@ -469,12 +469,179 @@ window.ArbaOfflineSync = (function () {
   // ---------------------------------------------------------------------------
   // 4. Service Worker Registration & PWA Install Prompt
   // ---------------------------------------------------------------------------
-  function registerServiceWorker() {
-    if (!isHttpOrigin() || !('serviceWorker' in navigator)) return;
+  const PWA_BANNER_DISMISSED_KEY = 'arbaconnect_pwa_banner_dismissed_at';
 
-    window.addEventListener('load', () => {
+  function isStandaloneApp() {
+    try {
+      return (
+        (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+        (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(display-mode: fullscreen)').matches) ||
+        (typeof navigator !== 'undefined' && navigator.standalone === true)
+      );
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function detectDevicePlatform() {
+    const ua = (typeof navigator !== 'undefined' && navigator.userAgent) ? navigator.userAgent : '';
+    const isIOS = /iPad|iPhone|iPod/i.test(ua) || (typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const isAndroid = /Android/i.test(ua);
+    const isMobile = isIOS || isAndroid || /Mobile|Tablet/i.test(ua) || (typeof window !== 'undefined' && window.innerWidth <= 900);
+    const isSafari = /Safari/i.test(ua) && !/Chrome|CriOS|FxiOS|EdgiOS|OPiOS/i.test(ua);
+    const isFirefox = /Firefox|FxiOS/i.test(ua);
+    return { isIOS, isAndroid, isMobile, isSafari, isFirefox };
+  }
+
+  function updateInstallUI() {
+    const headerBtn = document.getElementById('header-install-pwa-btn');
+    const banner = document.getElementById('pwa-mobile-install-banner');
+
+    if (isStandaloneApp()) {
+      if (headerBtn) headerBtn.classList.add('hidden');
+      if (banner) banner.classList.add('hidden');
+      return;
+    }
+
+    if (headerBtn) {
+      headerBtn.classList.remove('hidden');
+      if (deferredInstallPrompt) {
+        headerBtn.setAttribute('title', 'Install Aplikasi ArbaConnect Sekali Klik (Bisa Offline)');
+      } else {
+        headerBtn.setAttribute('title', 'Cara Install Aplikasi ArbaConnect di Perangkat (Bisa Offline)');
+      }
+    }
+
+    if (banner) {
+      let dismissedRecently = false;
+      try {
+        const ts = Number(localStorage.getItem(PWA_BANNER_DISMISSED_KEY) || 0);
+        if (ts && (Date.now() - ts) < 3 * 24 * 60 * 60 * 1000) {
+          dismissedRecently = true;
+        }
+      } catch (e) {}
+
+      const platform = detectDevicePlatform();
+      if (!dismissedRecently && (deferredInstallPrompt || platform.isMobile)) {
+        banner.classList.remove('hidden');
+      } else {
+        banner.classList.add('hidden');
+      }
+    }
+  }
+
+  function showManualInstallGuideModal() {
+    const platform = detectDevicePlatform();
+    const isOnlineNow = window.ArbaStore ? window.ArbaStore.getState().isOnline : true;
+
+    let stepsHtml = '';
+    if (platform.isIOS) {
+      stepsHtml = `
+        <div class="p-3 rounded-xl bg-surface-container-low border border-border-subtle text-xs space-y-2">
+          <div class="font-bold text-on-surface flex items-center gap-1.5">
+            <span class="material-symbols-outlined text-[16px] text-primary" aria-hidden="true">phone_iphone</span>
+            <span>Panduan Install di iPhone / iPad (Safari iOS)</span>
+          </div>
+          <ol class="pl-4 space-y-1.5 text-on-surface-variant" style="list-style:decimal; margin:0; padding-left:1.25rem;">
+            <li>Ketuk tombol <b>Bagikan (Share)</b> <span class="font-mono font-bold text-primary">[↑]</span> pada bilah bawah Safari.</li>
+            <li>Gulir ke bawah lalu pilih <b>"Tambahkan ke Layar Utama" (Add to Home Screen)</b>.</li>
+            <li>Ketuk <b>"Tambah" (Add)</b> di pojok kanan atas. Ikon <b>ArbaConnect</b> akan muncul di layar utama HP Anda dan bisa dibuka tanpa sinyal.</li>
+          </ol>
+        </div>
+      `;
+    } else if (platform.isAndroid) {
+      stepsHtml = `
+        <div class="p-3 rounded-xl bg-surface-container-low border border-border-subtle text-xs space-y-2">
+          <div class="font-bold text-on-surface flex items-center gap-1.5">
+            <span class="material-symbols-outlined text-[16px] text-primary" aria-hidden="true">android</span>
+            <span>Panduan Install di HP Android (Chrome / Edge / Brave / Firefox)</span>
+          </div>
+          <ol class="pl-4 space-y-1.5 text-on-surface-variant" style="list-style:decimal; margin:0; padding-left:1.25rem;">
+            <li>Ketuk ikon menu titik tiga <b>(⋮)</b> di pojok kanan atas browser HP Anda.</li>
+            <li>Pilih menu <b>"Install aplikasi"</b> atau <b>"Tambahkan ke layar utama" (Add to Home screen)</b>.</li>
+            <li>Ketuk <b>"Install"</b>. Aplikasi <b>ArbaConnect</b> akan terpasang seperti aplikasi asli dan tetap bekerja saat offline.</li>
+          </ol>
+        </div>
+      `;
+    } else {
+      stepsHtml = `
+        <div class="p-3 rounded-xl bg-surface-container-low border border-border-subtle text-xs space-y-2">
+          <div class="font-bold text-on-surface flex items-center gap-1.5">
+            <span class="material-symbols-outlined text-[16px] text-primary" aria-hidden="true">desktop_windows</span>
+            <span>Panduan Install di Laptop / PC (Chrome / Edge / Brave)</span>
+          </div>
+          <ol class="pl-4 space-y-1.5 text-on-surface-variant" style="list-style:decimal; margin:0; padding-left:1.25rem;">
+            <li>Klik ikon <b>Install App</b> di sebelah kanan kotak alamat URL browser, atau buka menu titik tiga <b>(⋮) → Simpan &amp; bagikan → Install ArbaConnect</b>.</li>
+            <li>Klik <b>"Install"</b> untuk memasang ikon aplikasi di Desktop / Start Menu Anda.</li>
+            <li>Aplikasi akan terbuka di jendela tersendiri, otomatis tersambung ke server web, dan tetap bisa dibuka saat internet terputus.</li>
+          </ol>
+        </div>
+      `;
+    }
+
+    const modalHtml = `
+      <div class="modal-dialog max-w-lg">
+        <div class="modal-header">
+          <div class="flex items-center gap-2.5">
+            <img src="icons/icon-192.png" alt="Logo ArbaConnect" width="36" height="36" style="border-radius:10px; flex-shrink:0;" />
+            <div>
+              <h3 class="font-bold text-sm text-on-surface">Install Aplikasi ArbaConnect (Web &amp; Offline)</h3>
+              <p class="text-[11px] text-on-surface-variant">Akses langsung dari Layar Utama HP &amp; Desktop tanpa perlu unduh APK</p>
+            </div>
+          </div>
+          <button id="pwa-guide-close" class="icon-btn" type="button" title="Tutup" aria-label="Tutup panduan install">
+            <span class="material-symbols-outlined" aria-hidden="true">close</span>
+          </button>
+        </div>
+        <div class="modal-body space-y-3">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+            <div class="p-2.5 rounded-lg bg-surface-container-low border border-border-subtle">
+              <div class="font-bold text-primary flex items-center gap-1"><span class="material-symbols-outlined text-[15px]" aria-hidden="true">cloud_sync</span>Tersambung Web</div>
+              <div class="text-[11px] text-on-surface-variant mt-0.5">Otomatis sinkron ke server pusat saat online</div>
+            </div>
+            <div class="p-2.5 rounded-lg bg-surface-container-low border border-border-subtle">
+              <div class="font-bold text-emerald-700 flex items-center gap-1"><span class="material-symbols-outlined text-[15px]" aria-hidden="true">wifi_off</span>100% Bisa Offline</div>
+              <div class="text-[11px] text-on-surface-variant mt-0.5">Stok, katalog, &amp; input nota tetap jalan tanpa sinyal</div>
+            </div>
+            <div class="p-2.5 rounded-lg bg-surface-container-low border border-border-subtle">
+              <div class="font-bold text-on-surface flex items-center gap-1"><span class="material-symbols-outlined text-[15px]" aria-hidden="true">smartphone</span>Ringan &amp; Cepat</div>
+              <div class="text-[11px] text-on-surface-variant mt-0.5">Tampilan layar penuh seperti aplikasi bawaan HP</div>
+            </div>
+          </div>
+          ${stepsHtml}
+          <div class="text-[11px] text-on-surface-variant flex items-center justify-between pt-1">
+            <span>Status Cache Offline: <b class="text-emerald-700">Siap (Service Worker &amp; IndexedDB Aktif)</b></span>
+            <span>Koneksi: <b>${isOnlineNow ? 'Online' : 'Offline'}</b></span>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="pwa-guide-ok" type="button" class="btn btn-primary">Mengerti</button>
+        </div>
+      </div>
+    `;
+
+    if (window.ArbaApp && typeof window.ArbaApp.openModal === 'function') {
+      window.ArbaApp.openModal(modalHtml);
+      const closeFn = () => window.ArbaApp.closeModal();
+      const btnX = document.getElementById('pwa-guide-close');
+      const btnOk = document.getElementById('pwa-guide-ok');
+      if (btnX) btnX.onclick = closeFn;
+      if (btnOk) btnOk.onclick = closeFn;
+    } else if (window.ArbaApp && window.ArbaApp.showToast) {
+      window.ArbaApp.showToast('Untuk install: Gunakan menu browser "Tambahkan ke Layar Utama" / "Install ArbaConnect"', 'install_mobile');
+    }
+  }
+
+  function registerServiceWorker() {
+    if (!isHttpOrigin() || !('serviceWorker' in navigator)) {
+      updateInstallUI();
+      return;
+    }
+
+    const doRegister = () => {
       navigator.serviceWorker.register('./sw.js').then((reg) => {
         console.log('[ArbaConnect PWA] Service Worker aktif:', reg.scope);
+        updateInstallUI();
       }).catch((err) => {
         console.warn('[ArbaConnect PWA] Gagal mendaftarkan Service Worker:', err);
       });
@@ -487,24 +654,48 @@ window.ArbaOfflineSync = (function () {
           }
         }
       });
-    });
+    };
 
-    // Tangkap event instalasi PWA untuk tombol Install App
+    if (document.readyState === 'complete') {
+      doRegister();
+    } else {
+      window.addEventListener('load', doRegister);
+    }
+
+    // Bind tombol di Floating Mobile Install Banner
+    const bannerInstallBtn = document.getElementById('pwa-banner-install-btn');
+    if (bannerInstallBtn) {
+      bannerInstallBtn.addEventListener('click', () => {
+        promptInstallPWA();
+      });
+    }
+    const bannerDismissBtn = document.getElementById('pwa-banner-dismiss-btn');
+    if (bannerDismissBtn) {
+      bannerDismissBtn.addEventListener('click', () => {
+        const banner = document.getElementById('pwa-mobile-install-banner');
+        if (banner) banner.classList.add('hidden');
+        try {
+          localStorage.setItem(PWA_BANNER_DISMISSED_KEY, String(Date.now()));
+        } catch (e) {}
+      });
+    }
+
+    // Tangkap event instalasi PWA untuk tombol Install App & Mobile Banner
     window.addEventListener('beforeinstallprompt', (e) => {
       e.preventDefault();
       deferredInstallPrompt = e;
-      const installBtn = document.getElementById('header-install-pwa-btn');
-      if (installBtn) installBtn.classList.remove('hidden');
+      updateInstallUI();
     });
 
     window.addEventListener('appinstalled', () => {
       deferredInstallPrompt = null;
-      const installBtn = document.getElementById('header-install-pwa-btn');
-      if (installBtn) installBtn.classList.add('hidden');
+      updateInstallUI();
       if (window.ArbaApp && window.ArbaApp.showToast) {
-        window.ArbaApp.showToast('Aplikasi ArbaConnect berhasil di-install di perangkat ini!', 'install_mobile');
+        window.ArbaApp.showToast('Aplikasi ArbaConnect berhasil di-install & siap diakses secara offline!', 'install_mobile');
       }
     });
+
+    updateInstallUI();
   }
 
   function registerBackgroundSync() {
@@ -515,17 +706,20 @@ window.ArbaOfflineSync = (function () {
   }
 
   async function promptInstallPWA() {
-    if (!deferredInstallPrompt) {
+    if (isStandaloneApp()) {
       if (window.ArbaApp && window.ArbaApp.showToast) {
-        window.ArbaApp.showToast('Untuk install: Gunakan menu browser "Tambahkan ke Layar Utama" / "Install ArbaConnect"', 'install_mobile');
+        window.ArbaApp.showToast('Aplikasi ArbaConnect sudah terpasang dan berjalan dalam mode Aplikasi!', 'check_circle');
       }
+      return true;
+    }
+    if (!deferredInstallPrompt) {
+      showManualInstallGuideModal();
       return false;
     }
     deferredInstallPrompt.prompt();
     const choice = await deferredInstallPrompt.userChoice;
     deferredInstallPrompt = null;
-    const installBtn = document.getElementById('header-install-pwa-btn');
-    if (installBtn) installBtn.classList.add('hidden');
+    updateInstallUI();
     return choice.outcome === 'accepted';
   }
 

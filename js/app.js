@@ -13,7 +13,7 @@
       if (typeof window !== 'undefined' && 'caches' in window) {
         window.caches.keys().then(function (keys) {
           keys.forEach(function (k) {
-            if (k.indexOf('arbaconnect-pwa-') === 0 && k !== 'arbaconnect-pwa-v22') {
+            if (k.indexOf('arbaconnect-pwa-') === 0 && k !== 'arbaconnect-pwa-v24') {
               window.caches.delete(k);
             }
           });

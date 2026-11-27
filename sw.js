@@ -8,7 +8,7 @@
  * 3. API Pusat (/api/*): Network-Only (dikelola oleh OfflineSync Queue + IndexedDB di sisi aplikasi).
  */
 
-const CACHE_VERSION = 'arbaconnect-pwa-v23';
+const CACHE_VERSION = 'arbaconnect-pwa-v24';
 const FONT_CACHE = 'arbaconnect-fonts-v1';
 const MAP_CACHE = 'arbaconnect-map-tiles-v1';
 
@@ -16,6 +16,9 @@ const APP_SHELL_ASSETS = [
   './',
   './index.html',
   './manifest.json',
+  './icons/apple-touch-icon.png',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
   './icons/icon-192.svg',
   './icons/icon-512.svg',
   './css/tokens.css',

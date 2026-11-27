@@ -18,18 +18,21 @@
 
     <!-- Mobile & PWA Full Display Metadata -->
     <link rel="manifest" href="manifest.json" />
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png" />
     <meta name="theme-color" content="#005c55" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="ArbaConnect" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 
     <!-- Pure Vanilla Stylesheets -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous" media="print" onload="this.media='all'" />
-    <link rel="stylesheet" href="css/tokens.css?v=23" />
-    <link rel="stylesheet" href="css/layout.css?v=23" />
-    <link rel="stylesheet" href="css/components.css?v=23" />
-    <link rel="stylesheet" href="css/utilities.css?v=23" />
-    <link rel="stylesheet" href="css/print.css?v=23" />
+    <link rel="stylesheet" href="css/tokens.css?v=24" />
+    <link rel="stylesheet" href="css/layout.css?v=24" />
+    <link rel="stylesheet" href="css/components.css?v=24" />
+    <link rel="stylesheet" href="css/utilities.css?v=24" />
+    <link rel="stylesheet" href="css/print.css?v=24" />
   </head>
   <body>
     <!-- App Shell Container -->
@@ -96,9 +99,10 @@
             <span id="header-online-text" class="hidden sm:inline">Tersinkron</span>
           </button>
 
-          <!-- Install PWA App Button (shown when installable) -->
-          <button id="header-install-pwa-btn" class="icon-btn hidden" type="button" title="Install Aplikasi ArbaConnect (PWA Offline-First)" aria-label="Install Aplikasi PWA">
+          <!-- Install PWA App Button (tersedia di Desktop & HP Android/iOS) -->
+          <button id="header-install-pwa-btn" class="pwa-install-header-btn" type="button" title="Install Aplikasi ArbaConnect di Perangkat (Bisa Diakses Offline)" aria-label="Install Aplikasi ArbaConnect">
             <span class="material-symbols-outlined text-[18px]" aria-hidden="true">install_mobile</span>
+            <span class="hidden md:inline">Install App</span>
           </button>
 
           <!-- Fullscreen Mode Toggle -->
@@ -245,24 +249,41 @@
       </div>
     </div>
 
+    <!-- Floating Mobile PWA Install Banner (Android, iOS & Mobile Browser) -->
+    <div id="pwa-mobile-install-banner" class="pwa-install-banner hidden" role="region" aria-label="Install Aplikasi ArbaConnect">
+      <div class="pwa-install-banner-left">
+        <img src="icons/icon-192.png" alt="Ikon ArbaConnect" width="40" height="40" class="pwa-install-banner-icon" />
+        <div class="pwa-install-banner-text">
+          <strong class="pwa-install-banner-title">Install Aplikasi ArbaConnect</strong>
+          <span class="pwa-install-banner-sub">Tersambung ke web &amp; tetap bisa dipakai offline di HP</span>
+        </div>
+      </div>
+      <div class="pwa-install-banner-actions">
+        <button id="pwa-banner-install-btn" type="button" class="pwa-banner-primary-btn">Install</button>
+        <button id="pwa-banner-dismiss-btn" type="button" class="pwa-banner-close-btn" aria-label="Tutup banner install aplikasi" title="Tutup">
+          <span class="material-symbols-outlined text-[18px]" aria-hidden="true">close</span>
+        </button>
+      </div>
+    </div>
+
     <!-- Modal & Toast Dynamic Mounting Containers -->
     <div id="modal-container"></div>
     <div id="toast-container"></div>
 
     <!-- Pure Vanilla Scripts Loaded in Deterministic Dependency Order (Cache-Busted & Non-Blocking Defer) -->
     <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
-    <script defer src="js/data.js?v=23"></script>
-    <script defer src="js/utils.js?v=23"></script>
-    <script defer src="js/offlineSync.js?v=23"></script>
-    <script defer src="js/store.js?v=23"></script>
-    <script defer src="js/auth.js?v=23"></script>
-    <script defer src="js/advancedFeatures.js?v=23"></script>
-    <script defer src="js/views/executiveDashboard.js?v=23"></script>
-    <script defer src="js/views/inventoryLedger.js?v=23"></script>
-    <script defer src="js/views/b2bCrm.js?v=23"></script>
-    <script defer src="js/views/orderApproval.js?v=23"></script>
-    <script defer src="js/views/fieldSalesPwa.js?v=23"></script>
-    <script defer src="js/views/userProfileAndAdmin.js?v=23"></script>
-    <script defer src="js/app.js?v=23"></script>
+    <script defer src="js/data.js?v=24"></script>
+    <script defer src="js/utils.js?v=24"></script>
+    <script defer src="js/offlineSync.js?v=24"></script>
+    <script defer src="js/store.js?v=24"></script>
+    <script defer src="js/auth.js?v=24"></script>
+    <script defer src="js/advancedFeatures.js?v=24"></script>
+    <script defer src="js/views/executiveDashboard.js?v=24"></script>
+    <script defer src="js/views/inventoryLedger.js?v=24"></script>
+    <script defer src="js/views/b2bCrm.js?v=24"></script>
+    <script defer src="js/views/orderApproval.js?v=24"></script>
+    <script defer src="js/views/fieldSalesPwa.js?v=24"></script>
+    <script defer src="js/views/userProfileAndAdmin.js?v=24"></script>
+    <script defer src="js/app.js?v=24"></script>
   </body>
 </html>
