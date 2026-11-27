@@ -68,9 +68,24 @@ const SERVER_AUTH_SECRET = process.env.ARBA_AUTH_SECRET ||
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const revokedTokens = new Set();
 
-const SECURITY_CSP_POLICY = "default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com/leaflet@1.9.4/dist/leaflet.js https://vercel.live; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com/leaflet@1.9.4/dist/leaflet.css; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.tile.openstreetmap.org https://unpkg.com; connect-src 'self' https://router.project-osrm.org https://*.tile.openstreetmap.org https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com https://vercel.live; object-src 'none'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'";
-const SECURITY_PERMISSIONS_POLICY = 'camera=(self), geolocation=(self), microphone=(), payment=(), usb=()';
+const SECURITY_CSP_POLICY = "default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com/leaflet@1.9.4/dist/leaflet.js https://vercel.live; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com/leaflet@1.9.4/dist/leaflet.css; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.tile.openstreetmap.org https://unpkg.com; connect-src 'self' https://router.project-osrm.org https://*.tile.openstreetmap.org https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com https://vercel.live; worker-src 'self'; manifest-src 'self'; object-src 'none'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests";
+const SECURITY_PERMISSIONS_POLICY = 'camera=(self), geolocation=(self), microphone=(), payment=(), usb=(), interest-cohort=()';
 const SECURITY_HSTS_POLICY = 'max-age=63072000; includeSubDomains; preload';
+
+function buildBaseSecurityHeaders(extraHeaders) {
+  return Object.assign({
+    'Strict-Transport-Security': SECURITY_HSTS_POLICY,
+    'Content-Security-Policy': SECURITY_CSP_POLICY,
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'SAMEORIGIN',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Permissions-Policy': SECURITY_PERMISSIONS_POLICY,
+    'Cross-Origin-Opener-Policy': 'same-origin',
+    'Cross-Origin-Resource-Policy': 'same-origin',
+    'X-Permitted-Cross-Domain-Policies': 'none',
+    'X-DNS-Prefetch-Control': 'off'
+  }, extraHeaders || {});
+}
 
 function isHttpsRequest(req) {
   if (process.env.VERCEL === '1' || process.env.VERCEL === 'true') return true;
@@ -1647,22 +1662,17 @@ function getAllowedCorsOrigin(req) {
 
 function sendJson(res, statusCode, body, req, extraHeaders) {
   const payload = JSON.stringify(body);
-  const headers = Object.assign({
+  const headers = buildBaseSecurityHeaders(Object.assign({
     'Content-Type': 'application/json; charset=utf-8',
-    'Cache-Control': 'no-store',
-    'X-Content-Type-Options': 'nosniff',
-    'X-Frame-Options': 'SAMEORIGIN',
-    'Referrer-Policy': 'strict-origin-when-cross-origin',
-    'X-XSS-Protection': '1; mode=block',
-    'Strict-Transport-Security': SECURITY_HSTS_POLICY,
-    'Permissions-Policy': SECURITY_PERMISSIONS_POLICY,
-    'Content-Security-Policy': SECURITY_CSP_POLICY,
+    'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+    'Pragma': 'no-cache',
+    'X-Robots-Tag': 'noindex, nofollow, noarchive',
     'Access-Control-Allow-Origin': getAllowedCorsOrigin(req),
     'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Arba-Token',
     'Vary': 'Origin'
-  }, extraHeaders || {});
+  }, extraHeaders || {}));
   res.writeHead(statusCode, headers);
   if (req && req.method === 'HEAD') {
     return res.end();
@@ -1902,10 +1912,10 @@ function readJsonBody(req) {
 const server = http.createServer(async (req, res) => {
   const rawHost = req && req.headers && (req.headers.host || req.headers.Host);
   if (rawHost !== undefined && !isSafeHostHeader(String(rawHost))) {
-    res.writeHead(400, {
+    res.writeHead(400, buildBaseSecurityHeaders({
       'Content-Type': 'application/json; charset=utf-8',
-      'X-Content-Type-Options': 'nosniff'
-    });
+      'Cache-Control': 'no-store'
+    }));
     return res.end(req.method === 'HEAD' ? undefined : JSON.stringify({ status: 'error', message: '400 Bad Request: Invalid Host header.' }));
   }
 
@@ -1914,10 +1924,10 @@ const server = http.createServer(async (req, res) => {
     const safeHost = isSafeHostHeader(String(rawHost || '')) ? String(rawHost).trim() : 'localhost';
     parsedUrl = new URL(req.url || '/', `http://${safeHost}`);
   } catch (urlErr) {
-    res.writeHead(400, {
+    res.writeHead(400, buildBaseSecurityHeaders({
       'Content-Type': 'application/json; charset=utf-8',
-      'X-Content-Type-Options': 'nosniff'
-    });
+      'Cache-Control': 'no-store'
+    }));
     return res.end(req.method === 'HEAD' ? undefined : JSON.stringify({ status: 'error', message: '400 Bad Request: Malformed URL.' }));
   }
   const pathname = parsedUrl.pathname;
@@ -2346,19 +2356,18 @@ const server = http.createServer(async (req, res) => {
     normalizedRel.endsWith('.sqlite-shm') ||
     normalizedRel.endsWith('.sql')
   ) {
-    res.writeHead(403, {
+    res.writeHead(403, buildBaseSecurityHeaders({
       'Content-Type': 'text/plain; charset=utf-8',
-      'X-Content-Type-Options': 'nosniff',
-      'Strict-Transport-Security': SECURITY_HSTS_POLICY,
-      'Content-Security-Policy': SECURITY_CSP_POLICY
-    });
+      'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+      'X-Robots-Tag': 'noindex, nofollow, noarchive'
+    }));
     return res.end(req.method === 'HEAD' ? undefined : '403 Forbidden: Access to protected server/database resource is denied.');
   }
 
   const safePath = path.normalize(path.join(ROOT_DIR, relPath));
 
   if (!safePath.startsWith(ROOT_DIR)) {
-    res.writeHead(403);
+    res.writeHead(403, buildBaseSecurityHeaders({ 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }));
     return res.end(req.method === 'HEAD' ? undefined : 'Forbidden');
   }
 
@@ -2368,44 +2377,35 @@ const server = http.createServer(async (req, res) => {
       const indexHtml = path.join(ROOT_DIR, 'index.html');
       fs.readFile(indexHtml, (e2, content) => {
         if (e2) {
-          res.writeHead(404);
+          res.writeHead(404, buildBaseSecurityHeaders({ 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }));
           return res.end(req.method === 'HEAD' ? undefined : 'Not Found');
         }
-        res.writeHead(200, {
+        res.writeHead(200, buildBaseSecurityHeaders({
           'Content-Type': 'text/html; charset=utf-8',
-          'X-Content-Type-Options': 'nosniff',
-          'X-Frame-Options': 'SAMEORIGIN',
-          'Referrer-Policy': 'strict-origin-when-cross-origin',
-          'Strict-Transport-Security': SECURITY_HSTS_POLICY,
-          'Permissions-Policy': SECURITY_PERMISSIONS_POLICY,
-          'Content-Security-Policy': SECURITY_CSP_POLICY
-        });
+          'Cache-Control': 'no-cache, must-revalidate'
+        }));
         res.end(req.method === 'HEAD' ? undefined : content);
       });
       return;
     }
 
     const ext = path.extname(safePath).toLowerCase();
-    const mime = MIME_TYPES[ext] || 'application/octet-stream';
-    const headers = {
+    const mime = safePath.endsWith('manifest.json')
+      ? 'application/manifest+json; charset=utf-8'
+      : (MIME_TYPES[ext] || 'application/octet-stream');
+    const headers = buildBaseSecurityHeaders({
       'Content-Type': mime,
       'Cache-Control': 'no-cache, no-store, must-revalidate',
       'Pragma': 'no-cache',
-      'Expires': '0',
-      'X-Content-Type-Options': 'nosniff',
-      'X-Frame-Options': 'SAMEORIGIN',
-      'Referrer-Policy': 'strict-origin-when-cross-origin',
-      'Strict-Transport-Security': SECURITY_HSTS_POLICY,
-      'Permissions-Policy': SECURITY_PERMISSIONS_POLICY,
-      'Content-Security-Policy': SECURITY_CSP_POLICY
-    };
+      'Expires': '0'
+    });
     if (safePath.endsWith('sw.js')) {
       headers['Service-Worker-Allowed'] = '/';
     }
 
     fs.readFile(safePath, (readErr, content) => {
       if (readErr) {
-        res.writeHead(500);
+        res.writeHead(500, buildBaseSecurityHeaders({ 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }));
         return res.end(req.method === 'HEAD' ? undefined : 'Internal Server Error');
       }
       res.writeHead(200, headers);
