@@ -26,13 +26,22 @@
     <meta name="apple-mobile-web-app-title" content="ArbaConnect" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 
+    <!-- Early Capture for Native PWA 1-Click Installer (Before Defer Scripts Load) -->
+    <script>
+      window.__arbaDeferredInstallPrompt = null;
+      window.addEventListener('beforeinstallprompt', function (e) {
+        e.preventDefault();
+        window.__arbaDeferredInstallPrompt = e;
+      });
+    </script>
+
     <!-- Pure Vanilla Stylesheets -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous" media="print" onload="this.media='all'" />
-    <link rel="stylesheet" href="css/tokens.css?v=24" />
-    <link rel="stylesheet" href="css/layout.css?v=24" />
-    <link rel="stylesheet" href="css/components.css?v=24" />
-    <link rel="stylesheet" href="css/utilities.css?v=24" />
-    <link rel="stylesheet" href="css/print.css?v=24" />
+    <link rel="stylesheet" href="css/tokens.css?v=25" />
+    <link rel="stylesheet" href="css/layout.css?v=25" />
+    <link rel="stylesheet" href="css/components.css?v=25" />
+    <link rel="stylesheet" href="css/utilities.css?v=25" />
+    <link rel="stylesheet" href="css/print.css?v=25" />
   </head>
   <body>
     <!-- App Shell Container -->
@@ -99,8 +108,8 @@
             <span id="header-online-text" class="hidden sm:inline">Tersinkron</span>
           </button>
 
-          <!-- Install PWA App Button (tersedia di Desktop & HP Android/iOS) -->
-          <button id="header-install-pwa-btn" class="pwa-install-header-btn" type="button" title="Install Aplikasi ArbaConnect di Perangkat (Bisa Diakses Offline)" aria-label="Install Aplikasi ArbaConnect">
+          <!-- Install PWA App Button (muncul otomatis saat native installer siap) -->
+          <button id="header-install-pwa-btn" class="pwa-install-header-btn hidden" type="button" title="Install Aplikasi ArbaConnect (Bisa Diakses Offline)" aria-label="Install Aplikasi ArbaConnect">
             <span class="material-symbols-outlined text-[18px]" aria-hidden="true">install_mobile</span>
             <span class="hidden md:inline">Install App</span>
           </button>
@@ -272,18 +281,18 @@
 
     <!-- Pure Vanilla Scripts Loaded in Deterministic Dependency Order (Cache-Busted & Non-Blocking Defer) -->
     <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
-    <script defer src="js/data.js?v=24"></script>
-    <script defer src="js/utils.js?v=24"></script>
-    <script defer src="js/offlineSync.js?v=24"></script>
-    <script defer src="js/store.js?v=24"></script>
-    <script defer src="js/auth.js?v=24"></script>
-    <script defer src="js/advancedFeatures.js?v=24"></script>
-    <script defer src="js/views/executiveDashboard.js?v=24"></script>
-    <script defer src="js/views/inventoryLedger.js?v=24"></script>
-    <script defer src="js/views/b2bCrm.js?v=24"></script>
-    <script defer src="js/views/orderApproval.js?v=24"></script>
-    <script defer src="js/views/fieldSalesPwa.js?v=24"></script>
-    <script defer src="js/views/userProfileAndAdmin.js?v=24"></script>
-    <script defer src="js/app.js?v=24"></script>
+    <script defer src="js/data.js?v=25"></script>
+    <script defer src="js/utils.js?v=25"></script>
+    <script defer src="js/offlineSync.js?v=25"></script>
+    <script defer src="js/store.js?v=25"></script>
+    <script defer src="js/auth.js?v=25"></script>
+    <script defer src="js/advancedFeatures.js?v=25"></script>
+    <script defer src="js/views/executiveDashboard.js?v=25"></script>
+    <script defer src="js/views/inventoryLedger.js?v=25"></script>
+    <script defer src="js/views/b2bCrm.js?v=25"></script>
+    <script defer src="js/views/orderApproval.js?v=25"></script>
+    <script defer src="js/views/fieldSalesPwa.js?v=25"></script>
+    <script defer src="js/views/userProfileAndAdmin.js?v=25"></script>
+    <script defer src="js/app.js?v=25"></script>
   </body>
 </html>
