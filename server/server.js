@@ -1890,6 +1890,35 @@ function isMutationAllowedForUser(callerUser, mut, fullState) {
 
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
+    // Di Vercel Serverless Functions, runtime otomatis mem-parsing JSON body ke req.body
+    // dan stream request bisa sudah selesai (readableEnded) sebelum handler dipanggil.
+    if (req && req.body !== undefined) {
+      if (typeof req.body === 'object' && req.body !== null && !Buffer.isBuffer(req.body)) {
+        return resolve(req.body);
+      }
+      if (typeof req.body === 'string') {
+        if (!req.body.trim()) return resolve({});
+        try {
+          return resolve(JSON.parse(req.body));
+        } catch (e) {
+          return reject(e);
+        }
+      }
+      if (Buffer.isBuffer(req.body)) {
+        const text = req.body.toString('utf8').trim();
+        if (!text) return resolve({});
+        try {
+          return resolve(JSON.parse(text));
+        } catch (e) {
+          return reject(e);
+        }
+      }
+    }
+
+    if (req && req.readableEnded) {
+      return resolve({});
+    }
+
     let raw = '';
     req.on('data', (chunk) => {
       raw += chunk;
