@@ -904,96 +904,85 @@
       var html = `
         <div class="modal-dialog max-w-4xl">
           <div class="modal-header">
-            <div class="flex items-center gap-3">
-              <div class="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
-                <span class="material-symbols-outlined text-[22px]">map</span>
+            <div class="flex items-center gap-2.5 min-w-0">
+              <div class="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                <span class="material-symbols-outlined text-[18px]">map</span>
               </div>
-              <div>
-                <div class="flex items-center gap-2 flex-wrap">
-                  <h3 class="font-bold text-sm text-on-surface">Peta Jalan Raya Nyata &amp; Optimasi Rute Distribusi Solo Raya (2-Opt + OSRM)</h3>
-                  <span id="tsp-route-engine-badge" class="badge badge-success">JALUR JALAN RAYA PRESISI</span>
-                </div>
-                <p class="text-xs text-on-surface-variant mt-0.5">
-                  Rute distribusi mengikuti geometri jalan raya nyata (Jl. Ahmad Yani, Jl. Slamet Riyadi, Jl. Ir. Sutami, Jl. Lawu, Jl. Solo-Jogja, Jl. Solo-Sragen).
-                </p>
-              </div>
+              <h3 class="font-bold text-sm text-on-surface truncate">Peta &amp; Rute Kunjungan</h3>
             </div>
-            <div class="flex items-center gap-2">
-              <select
-                id="tsp-rep-filter"
-                class="form-select"
-                style="width: auto; font-weight: 600;"
-              >
-                <option value="ALL" ${repFilter === 'ALL' ? 'selected' : ''}>Semua Rute Solo Raya (${st.outlets.length} Apotek)</option>
-                ${salesTeam.map(function (sr) {
-                  return `<option value="${sr.name}" ${repFilter === sr.name ? 'selected' : ''}>Sales: ${sr.name} (${sr.area})</option>`;
-                }).join('')}
-              </select>
-              <button id="tsp-modal-close" class="icon-btn" type="button" title="Tutup">
-                <span class="material-symbols-outlined">close</span>
-              </button>
-            </div>
+            <button id="tsp-modal-close" class="icon-btn shrink-0" type="button" title="Tutup">
+              <span class="material-symbols-outlined">close</span>
+            </button>
           </div>
 
-          <div class="modal-body">
-            <!-- KPI Penghematan Rute Jalan Raya -->
+          <div class="modal-body" style="padding: 0.9rem 1rem; gap: 0.75rem;">
+            <!-- Filter Sales Rep -->
+            <div class="flex items-center justify-between gap-2">
+              <select
+                id="tsp-rep-filter"
+                class="form-select text-xs font-semibold w-full"
+              >
+                <option value="ALL" ${repFilter === 'ALL' ? 'selected' : ''}>Semua Rute (${st.outlets.length} Outlet)</option>
+                ${salesTeam.map(function (sr) {
+                  return `<option value="${sr.name}" ${repFilter === sr.name ? 'selected' : ''}>${sr.name} (${sr.area})</option>`;
+                }).join('')}
+              </select>
+            </div>
+
+            <!-- Compact 4-Metric Strip -->
             <div class="adv-grid-4">
-              <div class="p-3 rounded-xl bg-surface-container-low border border-border-subtle">
-                <div class="text-[10px] font-bold uppercase text-on-surface-variant">Jarak Tempuh Jalan Raya</div>
-                <div id="tsp-kpi-opt-km" class="text-lg font-bold text-primary mt-0.5">${plan.optimizedKm} km</div>
-                <div id="tsp-kpi-unopt-km" class="text-[11px] text-on-surface-variant">Urutan tanpa optimasi: <s>${plan.unoptimizedKm} km</s></div>
+              <div class="p-2.5 rounded-lg bg-surface-container-low border border-border-subtle">
+                <div class="text-[10px] font-bold uppercase text-on-surface-variant">Jarak</div>
+                <div id="tsp-kpi-opt-km" class="text-sm font-bold text-primary mt-0.5">${plan.optimizedKm} km</div>
               </div>
-              <div class="p-3 rounded-xl bg-surface-container-low border border-border-subtle">
-                <div class="text-[10px] font-bold uppercase text-on-surface-variant">Efisiensi Rute (2-Opt TSP)</div>
-                <div id="tsp-kpi-saved-km" class="text-lg font-bold text-emerald-600 mt-0.5">Hemat ${plan.savedKm} km (${plan.savedPct}%)</div>
-                <div class="text-[11px] text-on-surface-variant">${stops.length} titik mitra bebas jalur silang</div>
+              <div class="p-2.5 rounded-lg bg-surface-container-low border border-border-subtle">
+                <div class="text-[10px] font-bold uppercase text-on-surface-variant">Hemat</div>
+                <div id="tsp-kpi-saved-km" class="text-sm font-bold text-emerald-600 mt-0.5">${plan.savedKm} km (${plan.savedPct}%)</div>
               </div>
-              <div class="p-3 rounded-xl bg-surface-container-low border border-border-subtle">
-                <div class="text-[10px] font-bold uppercase text-on-surface-variant">Estimasi Waktu Tempuh &amp; Audit</div>
-                <div id="tsp-kpi-duration" class="text-lg font-bold text-on-surface mt-0.5">${Math.floor(plan.totalDurationMinutes / 60)}j ${plan.totalDurationMinutes % 60}m</div>
-                <div class="text-[11px] text-on-surface-variant">Termasuk 15m kunjungan/apotek</div>
+              <div class="p-2.5 rounded-lg bg-surface-container-low border border-border-subtle">
+                <div class="text-[10px] font-bold uppercase text-on-surface-variant">Estimasi</div>
+                <div id="tsp-kpi-duration" class="text-sm font-bold text-on-surface mt-0.5">${Math.floor(plan.totalDurationMinutes / 60)}j ${plan.totalDurationMinutes % 60}m</div>
               </div>
-              <div class="p-3 rounded-xl bg-surface-container-low border border-border-subtle">
-                <div class="text-[10px] font-bold uppercase text-on-surface-variant">Konsumsi BBM Armada</div>
-                <div id="tsp-kpi-fuel-l" class="text-lg font-bold text-amber-600 mt-0.5">${plan.estimatedFuelLitres} Liter</div>
-                <div id="tsp-kpi-fuel-rp" class="text-[11px] text-on-surface-variant">~${window.ArbaUtils.formatRupiah(plan.estimatedFuelCostRp)}</div>
+              <div class="p-2.5 rounded-lg bg-surface-container-low border border-border-subtle">
+                <div class="text-[10px] font-bold uppercase text-on-surface-variant">BBM</div>
+                <div id="tsp-kpi-fuel-l" class="text-sm font-bold text-amber-600 mt-0.5">${plan.estimatedFuelLitres} L</div>
               </div>
             </div>
 
-            <!-- Peta Nyata Interaktif Leaflet + OpenStreetMap + OSRM Road Geometry -->
+            <!-- Peta Nyata Interaktif Leaflet + OpenStreetMap -->
             <div class="rounded-xl overflow-hidden border border-border-subtle bg-surface-container-lowest">
-              <div class="px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs bg-surface-container-low border-b border-border-subtle">
-                <span class="font-bold flex items-center gap-1.5 text-primary">
-                  <span class="material-symbols-outlined text-[16px]">alt_route</span>
-                  <span>JALUR JALAN RAYA NYATA (GUDANG KARTASURA → ${stops.length} MITRA APOTEK)</span>
+              <div class="px-3 py-2 flex items-center justify-between gap-2 text-xs bg-surface-container-low border-b border-border-subtle">
+                <span class="font-bold flex items-center gap-1 text-primary truncate">
+                  <span class="material-symbols-outlined text-[15px] shrink-0">alt_route</span>
+                  <span class="truncate">Rute (${stops.length} Outlet)</span>
                 </span>
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-1.5 shrink-0">
                   <button
                     type="button"
                     id="tsp-fit-bounds-btn"
-                    class="px-2.5 py-1 rounded-md bg-surface-container hover:bg-surface-container-high text-on-surface text-[11px] font-semibold cursor-pointer border border-border-subtle flex items-center gap-1"
+                    class="px-2 py-1 rounded-md bg-surface-container hover:bg-surface-container-high text-on-surface text-[11px] font-semibold cursor-pointer border border-border-subtle flex items-center gap-1 whitespace-nowrap"
                   >
                     <span class="material-symbols-outlined text-[14px]">center_focus_strong</span>
-                    <span>Reset Zoom Peta</span>
+                    <span>Reset</span>
                   </button>
                   <a
                     href="${gmapsMultiRouteUrl}"
                     target="_blank"
                     rel="noreferrer"
-                    class="px-2.5 py-1 rounded-md bg-primary hover:bg-primary-container text-white text-[11px] font-semibold flex items-center gap-1 no-underline"
+                    class="px-2.5 py-1 rounded-md bg-primary hover:bg-primary-container text-white text-[11px] font-semibold flex items-center gap-1 no-underline whitespace-nowrap"
                   >
                     <span class="material-symbols-outlined text-[14px]">directions</span>
-                    <span>Navigasi Rute di Google Maps</span>
+                    <span>Google Maps</span>
                   </a>
                 </div>
               </div>
 
               <!-- Container Peta Nyata Leaflet -->
-              <div id="arba-real-leaflet-map" style="width: 100%; height: 350px; z-index: 1; background: #e2e8f0;"></div>
+              <div id="arba-real-leaflet-map" style="width: 100%; height: 260px; z-index: 1; background: #e2e8f0;"></div>
 
               <!-- Fallback Radar SVG (Hanya ditampilkan bila perangkat sedang full offline dan Leaflet gagal dimuat) -->
               <div id="arba-offline-svg-fallback" style="display:none; background:linear-gradient(180deg, #0b192c 0%, #0f172a 100%);">
-                <svg viewBox="0 0 700 320" width="100%" height="260" style="display:block;">
+                <svg viewBox="0 0 700 320" width="100%" height="240" style="display:block;">
                   <polyline points="${polyPoints}" fill="none" stroke="#2dd4bf" stroke-width="2.5" stroke-dasharray="6 4" />
                   <g>
                     <rect x="${hqX - 11}" y="${hqY - 11}" width="22" height="22" rx="6" fill="#0284c7" stroke="#ffffff" stroke-width="2" />
@@ -1004,10 +993,10 @@
               </div>
             </div>
 
-            <!-- Daftar Urutan Kunjungan & Koridor Jalan yang Dilalui -->
+            <!-- Daftar Urutan Kunjungan -->
             <div>
               <div class="text-xs font-bold uppercase tracking-wider text-on-surface-variant mb-2">
-                Urutan Kunjungan &amp; Koridor Jalan Raya yang Dilalui (Klik Baris untuk Fokus Segmen Jalan)
+                Urutan Kunjungan
               </div>
               <div class="adv-grid-2 max-h-52 overflow-y-auto pr-1">
                 ${stops.map(function (s, idx) {
@@ -1016,17 +1005,14 @@
                   var singleGmapsUrl = 'https://www.google.com/maps/dir/?api=1&origin=' + encodeURIComponent(legOrigin) + '&destination=' + encodeURIComponent(s.lat + ',' + s.lng) + '&travelmode=driving';
                   return `
                     <div class="p-2.5 rounded-xl border border-border-subtle bg-surface-container-low flex items-center justify-between gap-2">
-                      <div class="flex items-center gap-2.5 min-w-0 cursor-pointer tsp-focus-marker-btn" data-lat="${s.lat}" data-lng="${s.lng}" data-stop="${s.stopNumber}">
-                        <div class="w-7 h-7 rounded-lg bg-primary text-white font-bold text-xs flex items-center justify-center shrink-0">
-                          #${s.stopNumber}
+                      <div class="flex items-center gap-2 min-w-0 cursor-pointer tsp-focus-marker-btn" data-lat="${s.lat}" data-lng="${s.lng}" data-stop="${s.stopNumber}">
+                        <div class="w-6 h-6 rounded-md bg-primary text-white font-bold text-[11px] flex items-center justify-center shrink-0">
+                          ${s.stopNumber}
                         </div>
                         <div class="min-w-0">
                           <div class="font-bold text-xs text-on-surface truncate">${window.ArbaUtils.escapeHtml(s.name)}</div>
                           <div class="text-[11px] text-on-surface-variant truncate">
-                            <span id="tsp-leg-stat-${s.stopNumber}" class="font-semibold text-primary">+${s.legKm} km (${s.legMin} mnt)</span> • ${window.ArbaUtils.escapeHtml(s.city)}
-                          </div>
-                          <div id="tsp-leg-road-${s.stopNumber}" class="text-[10px] text-on-surface-variant truncate">
-                            Via: ${window.ArbaUtils.escapeHtml(s.roadCorridor || s.viaCorridor || s.address)}
+                            <span id="tsp-leg-stat-${s.stopNumber}" class="font-semibold text-primary">+${s.legKm} km (${s.legMin}m)</span> · ${window.ArbaUtils.escapeHtml(s.city)}
                           </div>
                         </div>
                       </div>
@@ -1035,17 +1021,17 @@
                           href="${singleGmapsUrl}"
                           target="_blank"
                           rel="noreferrer"
-                          title="Buka Navigasi Segmen Jalan Ini di Google Maps"
-                          class="px-2 py-1.5 rounded-lg bg-surface-container-lowest hover:bg-surface-container text-primary text-[11px] font-semibold border border-border-subtle flex items-center"
+                          title="Google Maps"
+                          class="p-1.5 rounded-lg bg-surface-container-lowest hover:bg-surface-container text-primary border border-border-subtle flex items-center"
                         >
                           <span class="material-symbols-outlined text-[15px]">directions</span>
                         </a>
                         <button
                           type="button"
-                          class="tsp-select-stop-btn px-2.5 py-1.5 rounded-lg bg-surface-container-lowest hover:bg-primary hover:text-white text-on-surface text-[11px] font-semibold cursor-pointer border border-border-subtle shrink-0 transition-colors"
+                          class="tsp-select-stop-btn px-2.5 py-1 rounded-lg bg-surface-container-lowest hover:bg-primary hover:text-white text-on-surface text-[11px] font-semibold cursor-pointer border border-border-subtle shrink-0 transition-colors whitespace-nowrap"
                           data-code="${window.ArbaUtils.escapeHtml(s.code)}"
                         >
-                          Pilih Apotek
+                          Pilih
                         </button>
                       </div>
                     </div>
