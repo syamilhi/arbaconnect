@@ -42,6 +42,7 @@ function createInMemoryFallbackDb() {
   const kvStore = new Map();
   const revokedMap = new Map();
   const mutationsMap = new Map();
+  const auditLogsList = [];
   return {
     isFallbackMemory: true,
     exec() {},
@@ -49,6 +50,10 @@ function createInMemoryFallbackDb() {
       const q = String(sql || '').trim().toLowerCase();
       return {
         get(...args) {
+          if (q.includes('from erp_central_state')) {
+            const val = kvStore.get('main');
+            return val !== undefined ? { state_json: val } : undefined;
+          }
           if (q.includes('from app_kv_state')) {
             const val = kvStore.get(args[0]);
             return val !== undefined ? { value_json: val } : undefined;
@@ -61,6 +66,9 @@ function createInMemoryFallbackDb() {
             const m = mutationsMap.get(args[0]);
             return m ? { mutation_id: m.mutation_id } : undefined;
           }
+          if (q.includes('from audit_logs') && q.includes('count(*)')) {
+            return { c: auditLogsList.length };
+          }
           if (q.includes('select count(*)')) {
             return { c: 0 };
           }
@@ -70,11 +78,26 @@ function createInMemoryFallbackDb() {
           if (q.includes('from sync_mutations_log')) {
             return Array.from(mutationsMap.values()).slice(-30).reverse();
           }
+          if (q.includes('from audit_logs')) {
+            return auditLogsList.slice(0, 100);
+          }
           return [];
         },
         run(...args) {
-          if (q.includes('into app_kv_state')) {
+          if (q.includes('into erp_central_state')) {
+            kvStore.set('main', args[0]);
+          } else if (q.includes('into app_kv_state')) {
             kvStore.set(args[0], args[1]);
+          } else if (q.includes('into audit_logs')) {
+            auditLogsList.unshift({
+              id: args[0], action: args[1], actor: args[2], actor_role: args[3],
+              outlet_id: args[4], outlet_name: args[5], product_sku: args[6],
+              product_name: args[7], no_batch: args[8], qty: args[9],
+              doc_ref: args[10], details: args[11], checksum_hash: args[12], created_at: args[13]
+            });
+            if (auditLogsList.length > 500) auditLogsList.length = 500;
+          } else if (q.includes('delete from audit_logs')) {
+            auditLogsList.length = 0;
           } else if (q.includes('into revoked_tokens')) {
             revokedMap.set(args[0], args[1]);
           } else if (q.includes('delete from revoked_tokens')) {
@@ -94,6 +117,8 @@ function createInMemoryFallbackDb() {
               summary: args[3],
               synced_at: new Date().toISOString()
             });
+          } else if (q.includes('delete from sync_mutations_log')) {
+            mutationsMap.clear();
           }
           return { changes: 1 };
         }
@@ -121,20 +146,64 @@ function verifyCredentialHash(inputRaw, storedPlainOrHash, storedHashField) {
   }
 }
 
-// Hindari prediktabilitas __dirname (/var/task/server) di lingkungan Serverless/Vercel apabila ARBA_AUTH_SECRET belum disetel
+// Di Vercel Serverless, pastikan seluruh container dalam 1 deployment berbagi secret HMAC yang konsisten
+// agar token sesi tidak error 401 saat pindah instance serverless / cold start.
 const IS_SERVERLESS_RUNTIME = Boolean(
   process.env.VERCEL ||
   process.env.AWS_LAMBDA_FUNCTION_NAME ||
   __dirname.startsWith('/var/task')
 );
-const SERVER_BOOT_NONCE = IS_SERVERLESS_RUNTIME ? crypto.randomBytes(32).toString('hex') : '';
+const SERVER_STABLE_SEED =
+  process.env.VERCEL_PROJECT_ID ||
+  process.env.VERCEL_GIT_COMMIT_SHA ||
+  process.env.VERCEL_DEPLOYMENT_ID ||
+  __dirname;
 const SERVER_AUTH_SECRET = process.env.ARBA_AUTH_SECRET ||
-  crypto.createHash('sha256').update(
-    'ARBA-SESSION-HMAC-2026:' +
-    (IS_SERVERLESS_RUNTIME
-      ? (process.env.VERCEL_DEPLOYMENT_ID || process.env.VERCEL_GIT_COMMIT_SHA || SERVER_BOOT_NONCE) + ':' + SERVER_BOOT_NONCE
-      : __dirname)
-  ).digest('hex');
+  crypto.createHash('sha256').update('ARBA-SESSION-HMAC-2026:' + SERVER_STABLE_SEED).digest('hex');
+
+// Adapter Persistensi Cloud KV Opsional (Vercel KV / Upstash Redis REST API, zero-dependency)
+const CLOUD_KV_URL = (process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || '').replace(/\/+$/, '');
+const CLOUD_KV_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || '';
+const HAS_CLOUD_KV = Boolean(CLOUD_KV_URL && CLOUD_KV_TOKEN && typeof fetch === 'function');
+const CLOUD_KV_STATE_KEY = 'arbaconnect:central_state:v3';
+const STORAGE_MODE = HAS_CLOUD_KV
+  ? 'cloud-kv'
+  : (IS_SERVERLESS_RUNTIME ? 'serverless-ephemeral' : 'local-sqlite');
+
+async function cloudKvGetState() {
+  if (!HAS_CLOUD_KV) return null;
+  try {
+    const res = await fetch(`${CLOUD_KV_URL}/get/${encodeURIComponent(CLOUD_KV_STATE_KEY)}`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${CLOUD_KV_TOKEN}` }
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data || !data.result) return null;
+    return typeof data.result === 'string' ? JSON.parse(data.result) : data.result;
+  } catch (err) {
+    console.warn('[CloudKV] Gagal memuat state dari Cloud KV:', err.message);
+    return null;
+  }
+}
+
+async function cloudKvSetState(stateObj) {
+  if (!HAS_CLOUD_KV || !stateObj) return false;
+  try {
+    const res = await fetch(`${CLOUD_KV_URL}/set/${encodeURIComponent(CLOUD_KV_STATE_KEY)}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${CLOUD_KV_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(stateObj)
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn('[CloudKV] Gagal menyimpan state ke Cloud KV:', err.message);
+    return false;
+  }
+}
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const revokedTokens = new Set();
 
@@ -608,6 +677,24 @@ function initRelationalSchema() {
       exp_ms          INTEGER NOT NULL,
       revoked_at      TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- 14. Tabel Audit Log Terpisah (Pelacakan Siklus Hidup Barang & Jejak Audit CDOB/BPOM)
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id              TEXT PRIMARY KEY,
+      action          TEXT NOT NULL,
+      actor           TEXT NOT NULL,
+      actor_role      TEXT NOT NULL,
+      outlet_id       TEXT,
+      outlet_name     TEXT,
+      product_sku     TEXT,
+      product_name    TEXT,
+      no_batch        TEXT,
+      qty             INTEGER,
+      doc_ref         TEXT,
+      details         TEXT,
+      checksum_hash   TEXT NOT NULL,
+      created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 }
 
@@ -813,6 +900,83 @@ function syncStateToRelationalTables(state) {
       l.timestamp || new Date().toISOString()
     );
   });
+
+  // 14. Audit Logs Terpisah (Pelacakan Jejak Barang & Aksi User)
+  db.exec('DELETE FROM audit_logs;');
+  const insAudit = db.prepare(`
+    INSERT OR REPLACE INTO audit_logs (
+      id, action, actor, actor_role, outlet_id, outlet_name,
+      product_sku, product_name, no_batch, qty, doc_ref, details, checksum_hash, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  (state.auditLogs || []).slice(0, 500).forEach((al) => {
+    insAudit.run(
+      al.id,
+      al.action || 'SYSTEM_EVENT',
+      al.actor || 'Sistem',
+      al.actorRole || '-',
+      al.outletId || null,
+      al.outletName || null,
+      al.sku || null,
+      al.productName || null,
+      al.batch || null,
+      al.qty !== undefined && al.qty !== null ? Number(al.qty) : null,
+      al.docRef || null,
+      al.details || '',
+      al.checksum || '0000...0000',
+      al.isoTime || al.timestamp || new Date().toISOString()
+    );
+  });
+}
+
+function buildInitialAuditLogs(master) {
+  const logs = [];
+  (master.ledger || []).slice(0, 12).forEach((l, idx) => {
+    const actionMap = {
+      MASUK: 'INBOUND_BATCH',
+      KELUAR: 'ORDER_DISPATCHED',
+      PENYESUAIAN: 'ADJUST_STOCK',
+      RETUR: 'ORDER_RETURN'
+    };
+    logs.push({
+      id: `AUD-INIT-${String(idx + 1).padStart(3, '0')}`,
+      timestamp: l.timestamp || nowStamp(),
+      isoTime: new Date(Date.now() - (idx + 1) * 3600000).toISOString(),
+      action: actionMap[l.type] || 'STOCK_EVENT',
+      actor: l.operator || 'Sistem',
+      actorRole: l.operatorRole || 'Operasional Gudang',
+      outletId: null,
+      outletName: null,
+      sku: l.skuCode || null,
+      productName: l.skuName || null,
+      batch: l.batch || null,
+      qty: l.quantity || 0,
+      docRef: l.docRef || l.id,
+      details: `Mutasi ${l.type} ${l.quantity > 0 ? '+' : ''}${l.quantity} unit (Saldo akhir: ${l.finalStock})`,
+      checksum: l.hash || pseudoHash(l.id)
+    });
+  });
+  (master.orders || []).slice(0, 8).forEach((ord, idx) => {
+    const firstItem = (ord.items && ord.items[0]) || {};
+    logs.push({
+      id: `AUD-ORD-${String(idx + 1).padStart(3, '0')}`,
+      timestamp: ord.orderTime || nowStamp(),
+      isoTime: new Date(ord.orderTimestamp || (Date.now() - (idx + 2) * 5400000)).toISOString(),
+      action: ord.status === 'APPROVED' ? 'ORDER_APPROVED' : (ord.status === 'REJECTED' ? 'ORDER_REJECTED' : 'ORDER_CREATED'),
+      actor: ord.salesRep || 'Sales Lapangan',
+      actorRole: `Field Sales ${ord.salesRepId || ''}`.trim(),
+      outletId: ord.outletId || null,
+      outletName: ord.outletName || null,
+      sku: firstItem.sku || null,
+      productName: firstItem.name || `${(ord.items || []).length} SKU`,
+      batch: firstItem.batch ? String(firstItem.batch).replace('Batch: ', '') : null,
+      qty: (ord.items || []).reduce((s, it) => s + (Number(it.quantity) || 0), 0),
+      docRef: ord.clientUuid || ord.id,
+      details: `Pesanan ${ord.outletName} (${(ord.items || []).length} SKU, status: ${ord.status})`,
+      checksum: pseudoHash((ord.clientUuid || ord.id) + idx)
+    });
+  });
+  return logs;
 }
 
 function getCentralState() {
@@ -838,13 +1002,52 @@ function getCentralState() {
         needsSave = true;
       }
     }
+    // Backfill otomatis atribut regulasi CDOB (NIE BPOM, Halal BPJPH, Suhu, SIA/SIPA) & FEFO dinamis pada state lama
+    if (Array.isArray(parsed.products) && Array.isArray(master.products)) {
+      const masterProdMap = new Map(master.products.map((mp) => [mp.sku, mp]));
+      parsed.products.forEach((p) => {
+        const mp = masterProdMap.get(p.sku);
+        if (!mp) return;
+        if (!p.nieBpom && mp.nieBpom) { p.nieBpom = mp.nieBpom; needsSave = true; }
+        if (!p.noHalal && mp.noHalal) { p.noHalal = mp.noHalal; needsSave = true; }
+        if (!p.storageTemp && mp.storageTemp) { p.storageTemp = mp.storageTemp; needsSave = true; }
+        if (!p.fefoIsoDate && mp.fefoIsoDate) {
+          p.fefoDate = mp.fefoDate;
+          p.fefoIsoDate = mp.fefoIsoDate;
+          p.fefoDaysLeft = mp.fefoDaysLeft;
+          p.fefoStatus = mp.fefoStatus;
+          needsSave = true;
+        }
+      });
+    }
+    if (Array.isArray(parsed.outlets) && Array.isArray(master.outlets)) {
+      const masterOutMap = new Map(master.outlets.map((mo) => [mo.id, mo]));
+      parsed.outlets.forEach((o) => {
+        const mo = masterOutMap.get(o.id);
+        if (!mo) return;
+        if (!o.noSia && mo.noSia) { o.noSia = mo.noSia; needsSave = true; }
+        if (!o.noSipa && mo.noSipa) { o.noSipa = mo.noSipa; needsSave = true; }
+        if (!o.sipaExpiry && mo.sipaExpiry) { o.sipaExpiry = mo.sipaExpiry; needsSave = true; }
+        if (!o.sipaStatus && mo.sipaStatus) { o.sipaStatus = mo.sipaStatus; needsSave = true; }
+      });
+    }
+    if (!Array.isArray(parsed.auditLogs)) {
+      parsed.auditLogs = buildInitialAuditLogs(master);
+      needsSave = true;
+    }
+    if (!parsed.stateVersion) {
+      parsed.stateVersion = 1;
+      needsSave = true;
+    }
     if (needsSave) saveCentralState(parsed);
     return parsed;
   }
   const initialState = {
+    stateVersion: 1,
     users: (master.users || []).map((u) => sanitizeUserRecord(u)),
     products: master.products,
     ledger: master.ledger,
+    auditLogs: buildInitialAuditLogs(master),
     outlets: master.outlets,
     orders: master.orders,
     supplierPOs: master.supplierPOs,
@@ -858,7 +1061,12 @@ function getCentralState() {
   return initialState;
 }
 
-function saveCentralState(state) {
+function saveCentralState(state, bumpVersion) {
+  if (bumpVersion) {
+    state.stateVersion = Math.max(Date.now(), (Number(state.stateVersion) || 0) + 1);
+  } else if (!state.stateVersion) {
+    state.stateVersion = 1;
+  }
   const upsert = db.prepare(`
     INSERT INTO erp_central_state (id, state_json, updated_at)
     VALUES ('main', ?, datetime('now'))
@@ -866,6 +1074,25 @@ function saveCentralState(state) {
   `);
   upsert.run(JSON.stringify(state));
   syncStateToRelationalTables(state);
+}
+
+async function ensureCloudKvHydrated() {
+  if (!HAS_CLOUD_KV) return;
+  const remote = await cloudKvGetState();
+  if (!remote || typeof remote !== 'object') return;
+  const local = getCentralState();
+  const remoteVer = Number(remote.stateVersion) || 0;
+  const localVer = Number(local.stateVersion) || 0;
+  if (remoteVer > localVer) {
+    saveCentralState(remote, false);
+  }
+}
+
+async function persistCentralStateEverywhere(state) {
+  saveCentralState(state, true);
+  if (HAS_CLOUD_KV) {
+    await cloudKvSetState(state);
+  }
 }
 
 // Inisialisasi database saat server menyala
@@ -992,6 +1219,48 @@ function applyOutletCredit(state, order, sign) {
   order.creditApplied = sign > 0;
 }
 
+function isProductExpired(prod) {
+  if (!prod) return false;
+  if (prod.quarantined) return true;
+  if (typeof prod.fefoDaysLeft === 'number' && prod.fefoDaysLeft <= 0) return true;
+  if (prod.fefoIsoDate) {
+    const expMs = Date.parse(prod.fefoIsoDate);
+    if (!Number.isNaN(expMs) && expMs <= Date.now()) return true;
+  }
+  return false;
+}
+
+function isProductNearExpiry(prod) {
+  if (!prod) return false;
+  if (typeof prod.fefoDaysLeft === 'number' && prod.fefoDaysLeft > 0 && prod.fefoDaysLeft <= 30) return true;
+  if (/Kritis/i.test(String(prod.fefoStatus || ''))) return true;
+  return false;
+}
+
+function recordServerAuditLog(state, entry) {
+  if (!Array.isArray(state.auditLogs)) state.auditLogs = [];
+  const id = entry.id || `AUD-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+  const rec = {
+    id,
+    timestamp: entry.timestamp || nowStamp(),
+    isoTime: entry.isoTime || new Date().toISOString(),
+    action: entry.action || 'SYSTEM_EVENT',
+    actor: entry.actor || 'Sistem',
+    actorRole: entry.actorRole || '-',
+    outletId: entry.outletId || null,
+    outletName: entry.outletName || null,
+    sku: entry.sku || null,
+    productName: entry.productName || null,
+    batch: entry.batch || null,
+    qty: entry.qty !== undefined && entry.qty !== null ? Number(entry.qty) : null,
+    docRef: entry.docRef || null,
+    details: entry.details || '',
+    checksum: entry.checksum || pseudoHash(`${id}|${entry.action}|${entry.actor}|${entry.sku || ''}|${entry.docRef || ''}`)
+  };
+  state.auditLogs = [rec, ...state.auditLogs].slice(0, 500);
+  return rec;
+}
+
 /**
  * Terapkan satu mutasi ke state pusat secara deterministik & idempoten
  */
@@ -1073,14 +1342,35 @@ function applyMutationOnCentralState(state, mutation, callerUser) {
           delete orderCopy.shelfPhotoDataUrl;
         }
       }
-      orderCopy.stockDeducted = false;
-      const shortages = checkStockAvailability(state, orderCopy.items);
-      if (shortages.length === 0) {
-        deductOrderStock(state, orderCopy);
-      } else {
-        orderCopy.syncStatus = 'PENDING_WAREHOUSE';
+      // Cek apakah ada item mendekati expired (<30 hari / Kritis) -> wajib tahan & tunggu override Admin Penjualan/Gudang
+      const nearExpiryItems = [];
+      for (const it of sanitizedItems) {
+        const prod = findProduct(state, it.sku, it.name);
+        if (isProductNearExpiry(prod)) {
+          nearExpiryItems.push(`${prod.name} (${prod.activeBatch}, ED ${prod.fefoDate})`);
+        }
+      }
+      if (nearExpiryItems.length > 0 && orderCopy.expiryOverrideStatus !== 'APPROVED_OVERRIDE') {
+        orderCopy.requiresExpiryOverride = true;
+        orderCopy.expiryOverrideStatus = 'PENDING_OVERRIDE';
+        orderCopy.expiryOverrideItems = nearExpiryItems;
         orderCopy.priority = 'High';
-        orderCopy.stockWarning = 'Menunggu stok: ' + shortages.map((s) => `${s.name} (kurang ${s.shortBy} unit)`).join(', ');
+      }
+
+      orderCopy.stockDeducted = false;
+      if (orderCopy.requiresExpiryOverride && orderCopy.expiryOverrideStatus === 'PENDING_OVERRIDE') {
+        // Jangan potong stok dulu sebelum Admin Penjualan/Gudang menyetujui override mendesak
+        orderCopy.syncStatus = 'PENDING_EXPIRY_OVERRIDE';
+        orderCopy.stockWarning = 'Ditahan (Near-ED): Membutuhkan persetujuan override mendesak Admin Penjualan/Gudang untuk ' + nearExpiryItems.join(', ');
+      } else {
+        const shortages = checkStockAvailability(state, orderCopy.items);
+        if (shortages.length === 0) {
+          deductOrderStock(state, orderCopy);
+        } else {
+          orderCopy.syncStatus = 'PENDING_WAREHOUSE';
+          orderCopy.priority = 'High';
+          orderCopy.stockWarning = 'Menunggu stok: ' + shortages.map((s) => `${s.name} (kurang ${s.shortBy} unit)`).join(', ');
+        }
       }
 
       applyOutletCredit(state, orderCopy, 1);
@@ -1134,6 +1424,24 @@ function applyMutationOnCentralState(state, mutation, callerUser) {
       }
 
       state.orders = [orderCopy, ...state.orders];
+      // Catat ke tabel Audit Log terpisah untuk setiap item agar pelacakan 1 barang dari masuk sampai terjual akurat
+      (orderCopy.items || []).forEach((it) => {
+        recordServerAuditLog(state, {
+          action: orderCopy.requiresExpiryOverride ? 'ORDER_NEAR_ED_HELD' : 'ORDER_CREATED',
+          actor: orderCopy.salesRep || (callerUser && callerUser.name) || 'Sales Lapangan',
+          actorRole: `Field Sales ${orderCopy.salesRepId || ''}`.trim(),
+          outletId: orderCopy.outletId,
+          outletName: orderCopy.outletName,
+          sku: it.sku,
+          productName: it.name,
+          batch: String(it.batch || '-').replace('Batch: ', ''),
+          qty: it.quantity,
+          docRef: orderCopy.clientUuid || orderCopy.id,
+          details: orderCopy.requiresExpiryOverride
+            ? `Order ditahan (Near-ED) menunggu override mendesak Admin. Alasan outlet: ${orderCopy.expiryOverrideReason || orderCopy.notes || '-'}`
+            : `Order ${it.quantity} unit ke ${orderCopy.outletName} (${orderCopy.terms}) • Sync: ${orderCopy.syncStatus}`
+        });
+      });
       if (p.visitLog && !state.visitLogs.some((v) => v.id === p.visitLog.id)) {
         const vlogCopy = Object.assign({}, p.visitLog);
         if (callerUser && callerUser.role === 'field-sales') {
@@ -1159,6 +1467,15 @@ function applyMutationOnCentralState(state, mutation, callerUser) {
         (state.salesVisits || []).forEach((v) => {
           if (v.outletId === vlog.outletId && v.status === 'TERJADWAL') v.status = 'SELESAI';
         });
+        recordServerAuditLog(state, {
+          action: 'VISIT_LOGGED',
+          actor: vlog.salesRep || (callerUser && callerUser.name) || 'Sales Lapangan',
+          actorRole: 'Field Sales',
+          outletId: vlog.outletId,
+          outletName: vlog.outletName || (outlet ? outlet.name : vlog.outletId),
+          docRef: vlog.id,
+          details: `Check-in GPS (${vlog.gpsDistance || 0}m) • Hasil: ${vlog.outcome}${vlog.notes ? ' — ' + vlog.notes : ''}`
+        });
       }
       break;
     }
@@ -1166,9 +1483,67 @@ function applyMutationOnCentralState(state, mutation, callerUser) {
     case 'APPROVE_ORDER': {
       const ord = state.orders.find((o) => o.id === p.orderId || o.clientUuid === p.clientUuid || o.clientUuid === p.orderId);
       if (ord) {
+        if (ord.requiresExpiryOverride && ord.expiryOverrideStatus === 'PENDING_OVERRIDE' && !p.overrideReason) {
+          break;
+        }
+        if (p.overrideReason) {
+          ord.expiryOverrideStatus = 'APPROVED_OVERRIDE';
+          ord.expiryOverrideReason = String(p.overrideReason);
+          ord.expiryOverrideBy = (callerUser && callerUser.name) || 'Admin Penjualan';
+          ord.expiryOverrideAt = nowStamp();
+          ord.stockWarning = undefined;
+        }
         if (!ord.stockDeducted) deductOrderStock(state, ord);
         ord.status = 'APPROVED';
         ord.syncStatus = 'SYNCED_DEDUCTED';
+        (ord.items || []).forEach((it) => {
+          recordServerAuditLog(state, {
+            action: p.overrideReason ? 'NEAR_EXPIRY_OVERRIDE' : 'ORDER_APPROVED',
+            actor: (callerUser && callerUser.name) || 'Admin Penjualan',
+            actorRole: (callerUser && callerUser.title) || 'Admin Operasional',
+            outletId: ord.outletId,
+            outletName: ord.outletName,
+            sku: it.sku,
+            productName: it.name,
+            batch: String(it.batch || '-').replace('Batch: ', ''),
+            qty: it.quantity,
+            docRef: ord.clientUuid || ord.id,
+            details: p.overrideReason
+              ? `Override Mendesak Near-ED disetujui untuk ${ord.outletName}. Alasan: ${p.overrideReason}`
+              : `Faktur ${ord.clientUuid || ord.id} disetujui & stok batch FEFO dialokasikan untuk ${ord.outletName}`
+          });
+        });
+      }
+      break;
+    }
+
+    case 'APPROVE_EXPIRY_OVERRIDE': {
+      const ord = state.orders.find((o) => o.id === p.orderId || o.clientUuid === p.orderId);
+      if (ord) {
+        const reason = String(p.reason || 'Kebutuhan mendesak outlet, langsung dipakai sebelum tanggal kedaluwarsa').trim();
+        ord.expiryOverrideStatus = 'APPROVED_OVERRIDE';
+        ord.expiryOverrideReason = reason;
+        ord.expiryOverrideBy = (callerUser && callerUser.name) || p.approverName || 'Admin Penjualan & Gudang';
+        ord.expiryOverrideAt = nowStamp();
+        ord.stockWarning = undefined;
+        if (!ord.stockDeducted) deductOrderStock(state, ord);
+        ord.status = 'APPROVED';
+        ord.syncStatus = 'SYNCED_DEDUCTED';
+        (ord.items || []).forEach((it) => {
+          recordServerAuditLog(state, {
+            action: 'NEAR_EXPIRY_OVERRIDE',
+            actor: ord.expiryOverrideBy,
+            actorRole: (callerUser && callerUser.title) || 'Admin Penjualan / Gudang',
+            outletId: ord.outletId,
+            outletName: ord.outletName,
+            sku: it.sku,
+            productName: it.name,
+            batch: String(it.batch || '-').replace('Batch: ', ''),
+            qty: it.quantity,
+            docRef: ord.clientUuid || ord.id,
+            details: `Persetujuan Khusus Near-ED (Mendesak): ${reason}`
+          });
+        });
       }
       break;
     }
@@ -1177,9 +1552,23 @@ function applyMutationOnCentralState(state, mutation, callerUser) {
       (p.orderIds || []).forEach((id) => {
         const ord = state.orders.find((o) => o.id === id || o.clientUuid === id);
         if (ord) {
+          if (ord.requiresExpiryOverride && ord.expiryOverrideStatus === 'PENDING_OVERRIDE') return;
           if (!ord.stockDeducted) deductOrderStock(state, ord);
           ord.status = 'APPROVED';
           ord.syncStatus = 'SYNCED_DEDUCTED';
+          recordServerAuditLog(state, {
+            action: 'ORDER_APPROVED',
+            actor: (callerUser && callerUser.name) || 'Admin Penjualan',
+            actorRole: (callerUser && callerUser.title) || 'Admin Operasional',
+            outletId: ord.outletId,
+            outletName: ord.outletName,
+            sku: ord.items && ord.items[0] ? ord.items[0].sku : null,
+            productName: ord.items && ord.items[0] ? ord.items[0].name : null,
+            batch: ord.items && ord.items[0] ? String(ord.items[0].batch || '-').replace('Batch: ', '') : null,
+            qty: (ord.items || []).reduce((s, it) => s + (Number(it.quantity) || 0), 0),
+            docRef: ord.clientUuid || ord.id,
+            details: `Otorisasi massal faktur ${ord.outletName} (${(ord.items || []).length} SKU)`
+          });
         }
       });
       break;
@@ -1191,6 +1580,41 @@ function applyMutationOnCentralState(state, mutation, callerUser) {
         if (ord.stockDeducted) restoreOrderStock(state, ord, p.reason);
         if (ord.creditApplied) applyOutletCredit(state, ord, -1);
         ord.status = 'REJECTED';
+        if (ord.requiresExpiryOverride) ord.expiryOverrideStatus = 'REJECTED_OVERRIDE';
+        recordServerAuditLog(state, {
+          action: 'ORDER_REJECTED',
+          actor: (callerUser && callerUser.name) || 'Admin Penjualan',
+          actorRole: (callerUser && callerUser.title) || 'Admin Operasional',
+          outletId: ord.outletId,
+          outletName: ord.outletName,
+          sku: ord.items && ord.items[0] ? ord.items[0].sku : null,
+          productName: ord.items && ord.items[0] ? ord.items[0].name : null,
+          docRef: ord.clientUuid || ord.id,
+          details: `Pesanan ditolak/ditahan: ${p.reason || 'Pembatalan manual'}`
+        });
+      }
+      break;
+    }
+
+    case 'QUARANTINE_BATCH': {
+      const prod = state.products.find((pr) => pr.sku === p.sku);
+      if (prod) {
+        prod.quarantined = true;
+        prod.quarantineReason = p.reason || 'Penarikan / Karantina Batch CDOB BPOM';
+        prod.quarantinedAt = nowStamp();
+        prod.status = 'critical-expiry';
+        prod.fefoStatus = 'Dikarantina (Recall CDOB)';
+        recordServerAuditLog(state, {
+          action: 'BATCH_RECALL_QUARANTINE',
+          actor: (callerUser && callerUser.name) || 'QA / CDOB Officer',
+          actorRole: (callerUser && callerUser.title) || 'QA / Admin Gudang',
+          sku: prod.sku,
+          productName: prod.name,
+          batch: prod.activeBatch,
+          qty: prod.stock,
+          docRef: `RECALL-${prod.activeBatch}`,
+          details: `Karantina & Batch Recall CDOB: ${prod.quarantineReason}`
+        });
       }
       break;
     }
@@ -1226,6 +1650,17 @@ function applyMutationOnCentralState(state, mutation, callerUser) {
       if (!state.ledger.some((l) => l.id === entry.id)) {
         state.ledger = [entry, ...state.ledger];
       }
+      recordServerAuditLog(state, {
+        action: 'INBOUND_BATCH',
+        actor: entry.operator || (callerUser && callerUser.name) || 'Admin Gudang',
+        actorRole: entry.operatorRole || 'Warehouse Inbound',
+        sku: p.sku,
+        productName: prod ? prod.name : 'Produk Herbal',
+        batch: p.batch,
+        qty,
+        docRef: entry.docRef,
+        details: `Penerimaan batch masuk +${qty} unit (ED: ${p.expiryDate || '-'}, Saldo akhir: ${newStock})`
+      });
       break;
     }
 
@@ -1254,6 +1689,17 @@ function applyMutationOnCentralState(state, mutation, callerUser) {
       if (!state.ledger.some((l) => l.id === entry.id)) {
         state.ledger = [entry, ...state.ledger];
       }
+      recordServerAuditLog(state, {
+        action: 'ADJUST_STOCK',
+        actor: entry.operator || (callerUser && callerUser.name) || 'Auditor Gudang',
+        actorRole: entry.operatorRole || 'Stock Opname',
+        sku: p.sku,
+        productName: prod ? prod.name : 'Produk Herbal',
+        batch: p.batch,
+        qty: delta,
+        docRef: entry.docRef,
+        details: `Penyesuaian stok opname (${delta >= 0 ? '+' : ''}${delta} unit, Saldo: ${newStock}). Alasan: ${p.reason || '-'}`
+      });
       break;
     }
 
@@ -1332,7 +1778,20 @@ function applyMutationOnCentralState(state, mutation, callerUser) {
         }
       });
       const targetOrder = state.orders.find((o) => o.id === p.orderId || o.clientUuid === p.orderId);
-      if (targetOrder) targetOrder.status = 'DISPATCHED';
+      if (targetOrder) {
+        targetOrder.status = 'DISPATCHED';
+        recordServerAuditLog(state, {
+          action: 'ORDER_DELIVERED',
+          actor: p.driverName || (callerUser && callerUser.name) || 'Driver Armada',
+          actorRole: 'Armada Pengiriman',
+          outletId: targetOrder.outletId,
+          outletName: targetOrder.outletName,
+          sku: targetOrder.items && targetOrder.items[0] ? targetOrder.items[0].sku : null,
+          productName: targetOrder.items && targetOrder.items[0] ? targetOrder.items[0].name : null,
+          docRef: targetOrder.clientUuid || targetOrder.id,
+          details: `Bukti Serah Terima (POD) diterima di ${targetOrder.outletName} oleh Driver ${p.driverName || '-'}`
+        });
+      }
       break;
     }
 
@@ -1782,21 +2241,21 @@ function authenticateRequest(req, parsedUrl) {
 const ROLE_ALLOWED_MUTATIONS = {
   'super-admin': '*',
   'executive': new Set([
-    'SUBMIT_ORDER', 'LOG_VISIT', 'APPROVE_ORDER', 'BATCH_APPROVE_ORDERS', 'REJECT_ORDER',
-    'ADD_INBOUND_BATCH', 'ADJUST_STOCK', 'SUBSTITUTE_BATCH', 'ADJUST_ORDER_QTY',
+    'SUBMIT_ORDER', 'LOG_VISIT', 'APPROVE_ORDER', 'APPROVE_EXPIRY_OVERRIDE', 'BATCH_APPROVE_ORDERS', 'REJECT_ORDER',
+    'ADD_INBOUND_BATCH', 'ADJUST_STOCK', 'QUARANTINE_BATCH', 'SUBSTITUTE_BATCH', 'ADJUST_ORDER_QTY',
     'CREATE_SUPPLIER_PO', 'SCHEDULE_VISIT', 'MARK_DELIVERED', 'ADD_OUTLET',
     'RECORD_WAREHOUSE_LOAD', 'RECONCILE_LOADING', 'IMPORT_OUTLETS', 'IMPORT_PRODUCTS',
     'REBALANCE_CONSIGNMENT', 'BATCH_REBALANCE_CONSIGNMENT', 'RESOLVE_EXPIRY_ALARM',
     'UPDATE_OUTLET_CREDIT_POLICY', 'UPDATE_USER', 'CHANGE_USER_PASSWORD'
   ]),
   'inventory': new Set([
-    'ADD_INBOUND_BATCH', 'ADJUST_STOCK', 'SUBSTITUTE_BATCH', 'ADJUST_ORDER_QTY',
+    'ADD_INBOUND_BATCH', 'ADJUST_STOCK', 'QUARANTINE_BATCH', 'SUBSTITUTE_BATCH', 'ADJUST_ORDER_QTY',
     'CREATE_SUPPLIER_PO', 'RECORD_WAREHOUSE_LOAD', 'RECONCILE_LOADING', 'IMPORT_PRODUCTS',
-    'APPROVE_ORDER', 'BATCH_APPROVE_ORDERS', 'MARK_DELIVERED', 'REBALANCE_CONSIGNMENT',
+    'APPROVE_ORDER', 'APPROVE_EXPIRY_OVERRIDE', 'BATCH_APPROVE_ORDERS', 'MARK_DELIVERED', 'REBALANCE_CONSIGNMENT',
     'BATCH_REBALANCE_CONSIGNMENT', 'RESOLVE_EXPIRY_ALARM', 'UPDATE_USER', 'CHANGE_USER_PASSWORD'
   ]),
   'sales-ops': new Set([
-    'APPROVE_ORDER', 'BATCH_APPROVE_ORDERS', 'REJECT_ORDER', 'SUBSTITUTE_BATCH',
+    'APPROVE_ORDER', 'APPROVE_EXPIRY_OVERRIDE', 'BATCH_APPROVE_ORDERS', 'REJECT_ORDER', 'SUBSTITUTE_BATCH',
     'ADJUST_ORDER_QTY', 'MARK_DELIVERED', 'ADD_OUTLET', 'SCHEDULE_VISIT',
     'IMPORT_OUTLETS', 'UPDATE_OUTLET_CREDIT_POLICY', 'REBALANCE_CONSIGNMENT',
     'BATCH_REBALANCE_CONSIGNMENT', 'RESOLVE_EXPIRY_ALARM', 'SUBMIT_ORDER', 'LOG_VISIT',
@@ -1961,6 +2420,17 @@ function isMutationAllowedForUser(callerUser, mut, fullState) {
     if (hasInvalidQty) {
       return { allowed: false, message: 'Pesanan ditolak: Setiap item pesanan wajib memiliki kuantitas bilangan bulat positif (>= 1).' };
     }
+    const st = fullState || getCentralState();
+    const blockedItem = incomingOrder.items.find((it) => {
+      const prod = findProduct(st, it.sku || it.productId, it.name);
+      return isProductExpired(prod);
+    });
+    if (blockedItem) {
+      return {
+        allowed: false,
+        message: `Pesanan ditolak (CDOB): Produk "${blockedItem.name || blockedItem.sku}" sudah kedaluwarsa (expired) atau sedang dikarantina.`
+      };
+    }
     return { allowed: true };
   }
 
@@ -2086,11 +2556,16 @@ const server = http.createServer(async (req, res) => {
       order_items: db.prepare('SELECT COUNT(*) AS c FROM order_items').get().c,
       stock_ledger: db.prepare('SELECT COUNT(*) AS c FROM stock_ledger').get().c,
       alerts: db.prepare('SELECT COUNT(*) AS c FROM alerts').get().c,
+      audit_logs: db.prepare('SELECT COUNT(*) AS c FROM audit_logs').get().c,
       synced_mutations: db.prepare('SELECT COUNT(*) AS c FROM sync_mutations_log').get().c
     };
     return sendJson(res, 200, {
       status: 'ok',
-      engine: 'Node.js Built-in SQLite Relational Engine (WAL Mode)',
+      engine: HAS_CLOUD_KV
+        ? 'Cloud KV Persistent Store + SQLite Relational Engine'
+        : (IS_SERVERLESS_RUNTIME ? 'Serverless Ephemeral SQLite (Hubungkan Vercel KV / Upstash Redis untuk persistensi lintas instance)' : 'Node.js Built-in SQLite Relational Engine (WAL Mode)'),
+      storageMode: STORAGE_MODE,
+      cloudKvConfigured: HAS_CLOUD_KV,
       databaseFile: 'database/arbaconnect.sqlite',
       connectedClients: sseClients.size,
       relationalTables: counts,
@@ -2100,14 +2575,55 @@ const server = http.createServer(async (req, res) => {
 
   // 2) Ambil State Pusat (Wajib Terautentikasi & Tanpa Plaintext Kredensial)
   if (pathname === '/api/state' && isGetOrHead) {
+    await ensureCloudKvHydrated();
     const auth = authenticateRequest(req, parsedUrl);
     if (!auth.ok) {
       return sendJson(res, auth.status, { status: 'error', message: auth.message }, req);
     }
-    const state = sanitizeStateForClient(getCentralState(), auth.user);
+    const rawState = getCentralState();
+    const state = sanitizeStateForClient(rawState, auth.user);
     return sendJson(res, 200, {
       status: 'ok',
+      storageMode: STORAGE_MODE,
+      stateVersion: rawState.stateVersion || 1,
       state,
+      timestamp: new Date().toISOString()
+    }, req);
+  }
+
+  // 2B) Endpoint Audit Log Terpisah (`GET /api/audit-logs` — Pelacakan Jejak Barang & Audit CDOB)
+  if (pathname === '/api/audit-logs' && isGetOrHead) {
+    await ensureCloudKvHydrated();
+    const auth = authenticateRequest(req, parsedUrl);
+    if (!auth.ok) {
+      return sendJson(res, auth.status, { status: 'error', message: auth.message }, req);
+    }
+    const rawState = getCentralState();
+    let logs = Array.isArray(rawState.auditLogs) ? rawState.auditLogs.slice() : [];
+    const skuFilter = (parsedUrl.searchParams.get('sku') || '').trim().toLowerCase();
+    const batchFilter = (parsedUrl.searchParams.get('batch') || '').trim().toLowerCase();
+    const actorFilter = (parsedUrl.searchParams.get('actor') || '').trim().toLowerCase();
+    const outletFilter = (parsedUrl.searchParams.get('outletId') || '').trim().toLowerCase();
+    const actionFilter = (parsedUrl.searchParams.get('action') || '').trim().toUpperCase();
+    const qFilter = (parsedUrl.searchParams.get('q') || '').trim().toLowerCase();
+
+    if (skuFilter) logs = logs.filter((l) => String(l.sku || '').toLowerCase().includes(skuFilter));
+    if (batchFilter) logs = logs.filter((l) => String(l.batch || '').toLowerCase().includes(batchFilter));
+    if (actorFilter) logs = logs.filter((l) => String(l.actor || '').toLowerCase().includes(actorFilter));
+    if (outletFilter) logs = logs.filter((l) => String(l.outletId || '').toLowerCase().includes(outletFilter) || String(l.outletName || '').toLowerCase().includes(outletFilter));
+    if (actionFilter && actionFilter !== 'ALL') logs = logs.filter((l) => String(l.action || '').toUpperCase() === actionFilter);
+    if (qFilter) {
+      logs = logs.filter((l) =>
+        [l.id, l.action, l.actor, l.outletName, l.sku, l.productName, l.batch, l.docRef, l.details]
+          .some((val) => String(val || '').toLowerCase().includes(qFilter))
+      );
+    }
+
+    return sendJson(res, 200, {
+      status: 'ok',
+      total: logs.length,
+      storageMode: STORAGE_MODE,
+      auditLogs: logs.slice(0, 250),
       timestamp: new Date().toISOString()
     }, req);
   }
@@ -2165,6 +2681,7 @@ const server = http.createServer(async (req, res) => {
 
   if (pathname === '/api/auth/login' && req.method === 'POST') {
     try {
+      await ensureCloudKvHydrated();
       pruneSecurityCaches();
       const body = await readJsonBody(req);
       const q = String(body.identifier || '').trim().toLowerCase();
@@ -2254,6 +2771,7 @@ const server = http.createServer(async (req, res) => {
 
   // 4) Endpoint Sinkronisasi Batch Offline -> Online (`POST /api/sync` - Wajib Terautentikasi & RBAC)
   if (pathname === '/api/sync' && req.method === 'POST') {
+    await ensureCloudKvHydrated();
     const auth = authenticateRequest(req, parsedUrl);
     if (!auth.ok) {
       return sendJson(res, auth.status, { status: 'error', message: auth.message }, req);
@@ -2331,9 +2849,13 @@ const server = http.createServer(async (req, res) => {
         }
 
         if (appliedCount > 0) {
-          saveCentralState(state);
+          saveCentralState(state, true);
         }
         db.exec('COMMIT;');
+
+        if (appliedCount > 0 && HAS_CLOUD_KV) {
+          await cloudKvSetState(state);
+        }
 
         const rawUpdatedState = getCentralState();
         const callerState = sanitizeStateForClient(rawUpdatedState, auth.user);
@@ -2363,6 +2885,8 @@ const server = http.createServer(async (req, res) => {
 
         return sendJson(res, 200, {
           status: 'ok',
+          storageMode: STORAGE_MODE,
+          stateVersion: rawUpdatedState.stateVersion || 1,
           appliedCount,
           skippedDuplicates,
           refreshedToken,
@@ -2392,9 +2916,11 @@ const server = http.createServer(async (req, res) => {
     }
     const master = loadInitialMasterData();
     const initialState = {
+      stateVersion: Date.now(),
       users: (master.users || []).map((u) => sanitizeUserRecord(u)),
       products: master.products,
       ledger: master.ledger,
+      auditLogs: buildInitialAuditLogs(master),
       outlets: master.outlets,
       orders: master.orders,
       supplierPOs: master.supplierPOs,
@@ -2405,7 +2931,7 @@ const server = http.createServer(async (req, res) => {
       visitLogs: master.visitLogs
     };
     db.exec('DELETE FROM sync_mutations_log;');
-    saveCentralState(initialState);
+    await persistCentralStateEverywhere(initialState);
     const safeBroadcastInitial = sanitizeStateForClient(initialState, null);
     const safeCallerInitial = sanitizeStateForClient(initialState, auth.user);
     broadcastSSE('state_updated', {

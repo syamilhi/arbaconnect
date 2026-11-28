@@ -24,6 +24,8 @@
     selectedCategory: 'all',
     selectedRopStatus: 'all',
     activeLedgerFilter: 'ALL',
+    auditSearchQuery: '',
+    activeAuditFilter: 'ALL',
     catalogPage: 1,
     catalogPageSize: 6
   };
@@ -32,6 +34,7 @@
     var appState = window.ArbaStore.getState();
     var products = appState.products;
     var ledger = appState.ledger;
+    var auditLogs = appState.auditLogs || [];
     var supplierPOs = appState.supplierPOs;
     var salesLoadings = appState.salesLoadings || [];
 
@@ -75,6 +78,15 @@
     var filteredLedger = ledger.filter(function (entry) {
       if (state.activeLedgerFilter === 'ALL') return true;
       return entry.type === state.activeLedgerFilter;
+    });
+
+    // Filter Audit Log Terpisah (Pelacakan 1 barang dari masuk hingga terjual)
+    var auditQ = (state.auditSearchQuery || '').trim().toLowerCase();
+    var filteredAuditLogs = auditLogs.filter(function (al) {
+      if (state.activeAuditFilter !== 'ALL' && al.action !== state.activeAuditFilter) return false;
+      if (!auditQ) return true;
+      return [al.id, al.action, al.actor, al.outletName, al.outletId, al.sku, al.productName, al.batch, al.docRef, al.details]
+        .some(function (v) { return String(v || '').toLowerCase().indexOf(auditQ) !== -1; });
     });
 
     var activeRole = (appState.currentUser && appState.currentUser.role === 'super-admin')
@@ -752,6 +764,118 @@
             </div>
           </div>
         </section>
+
+        <!-- SECTION 3: Audit Log Terpisah (Pelacakan Siklus Hidup Barang & Jejak Audit CDOB/BPOM) -->
+        <section class="flex flex-col gap-space-md bg-surface-container-lowest p-space-lg rounded-xl shadow-xs border border-border-subtle/40">
+          <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <h2 class="font-headline-md text-headline-md text-on-surface font-bold text-lg">
+                  Audit Log Terpisah &amp; Pelacakan Jejak Barang (Traceability)
+                </h2>
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[11px] font-bold">
+                  <span class="material-symbols-outlined text-[13px]">policy</span>
+                  Tabel Terpisah (audit_logs)
+                </span>
+              </div>
+              <p class="font-body-sm text-body-sm text-on-surface-variant text-xs mt-0.5">
+                Lacak riwayat lengkap 1 barang/batch dari masuk gudang hingga terjual ke outlet (pelaku, outlet, tanggal &amp; jam) terpisah dari tabel transaksi utama.
+              </p>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+              <div class="relative min-w-[220px]">
+                <span class="material-symbols-outlined text-on-surface-variant absolute left-2.5 top-2 text-[16px] pointer-events-none" style="position:absolute; left:0.65rem; top:0.5rem;">search</span>
+                <input
+                  id="audit-log-search"
+                  type="text"
+                  value="${window.ArbaUtils.escapeHtml(state.auditSearchQuery)}"
+                  placeholder="Cari SKU, Batch, Sales, Outlet..."
+                  class="w-full pl-8 pr-3 py-1.5 rounded-lg bg-surface-container-low text-xs text-on-surface border border-border-subtle/50 focus:outline-none"
+                  style="padding-left:2rem;"
+                />
+              </div>
+              <select
+                id="audit-log-action-filter"
+                aria-label="Filter tipe aksi audit log"
+                class="px-3 py-1.5 rounded-lg bg-surface-container-low text-xs font-semibold text-on-surface border border-border-subtle/50 cursor-pointer"
+              >
+                <option value="ALL" ${state.activeAuditFilter === 'ALL' ? 'selected' : ''}>Semua Aktivitas (${auditLogs.length})</option>
+                <option value="INBOUND_BATCH" ${state.activeAuditFilter === 'INBOUND_BATCH' ? 'selected' : ''}>Barang Masuk (Inbound)</option>
+                <option value="ORDER_CREATED" ${state.activeAuditFilter === 'ORDER_CREATED' ? 'selected' : ''}>Penjualan / Order Baru</option>
+                <option value="ORDER_NEAR_ED_HELD" ${state.activeAuditFilter === 'ORDER_NEAR_ED_HELD' ? 'selected' : ''}>Order Near-ED Ditahan</option>
+                <option value="NEAR_EXPIRY_OVERRIDE" ${state.activeAuditFilter === 'NEAR_EXPIRY_OVERRIDE' ? 'selected' : ''}>Override Mendesak Near-ED</option>
+                <option value="ORDER_APPROVED" ${state.activeAuditFilter === 'ORDER_APPROVED' ? 'selected' : ''}>Faktur Disetujui</option>
+                <option value="ORDER_DELIVERED" ${state.activeAuditFilter === 'ORDER_DELIVERED' ? 'selected' : ''}>Terkirim / POD Armada</option>
+                <option value="ORDER_REJECTED" ${state.activeAuditFilter === 'ORDER_REJECTED' ? 'selected' : ''}>Order Ditolak / Retur</option>
+                <option value="BATCH_RECALL_QUARANTINE" ${state.activeAuditFilter === 'BATCH_RECALL_QUARANTINE' ? 'selected' : ''}>Karantina / Batch Recall</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="overflow-x-auto rounded-xl border border-border-subtle/30">
+            <table class="w-full text-left text-xs">
+              <thead>
+                <tr class="bg-surface-container-low/60 text-on-surface-variant font-label-sm uppercase tracking-wider">
+                  <th class="py-2.5 px-3">ID &amp; Waktu (WIB)</th>
+                  <th class="py-2.5 px-3">Aksi Audit</th>
+                  <th class="py-2.5 px-3">Pelaku &amp; Peran</th>
+                  <th class="py-2.5 px-3">Barang / SKU &amp; Batch</th>
+                  <th class="py-2.5 px-3">Outlet Tujuan</th>
+                  <th class="py-2.5 px-3">Detail &amp; Ref Dokumen</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-border-subtle/30">
+                ${filteredAuditLogs.length === 0 ? `
+                  <tr>
+                    <td colspan="6" class="py-6 text-center text-on-surface-variant text-xs">
+                      Tidak ada entri audit log yang cocok dengan filter pencarian.
+                    </td>
+                  </tr>
+                ` : filteredAuditLogs.slice(0, 40).map(function (al) {
+                  var actStyle = 'background:#e2e8f0; color:#334155;';
+                  if (al.action === 'INBOUND_BATCH') actStyle = 'background:#dcfce7; color:#166534;';
+                  else if (al.action === 'ORDER_CREATED' || al.action === 'ORDER_APPROVED') actStyle = 'background:#ccfbf1; color:#0f766e;';
+                  else if (al.action === 'NEAR_EXPIRY_OVERRIDE' || al.action === 'ORDER_NEAR_ED_HELD') actStyle = 'background:#fef3c7; color:#92400e;';
+                  else if (al.action === 'ORDER_REJECTED' || al.action === 'BATCH_RECALL_QUARANTINE') actStyle = 'background:#ffe4e6; color:#9f1239;';
+                  else if (al.action === 'ORDER_DELIVERED') actStyle = 'background:#dbeafe; color:#1e40af;';
+                  return `
+                    <tr class="hover:bg-surface-container-low/40 transition-colors">
+                      <td class="py-2.5 px-3 whitespace-nowrap">
+                        <div class="font-mono font-bold text-on-surface text-[11px]">${window.ArbaUtils.escapeHtml(al.id)}</div>
+                        <div class="text-[10px] text-on-surface-variant">${window.ArbaUtils.escapeHtml(al.timestamp || al.isoTime)}</div>
+                      </td>
+                      <td class="py-2.5 px-3 whitespace-nowrap">
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold" style="${actStyle}">
+                          ${window.ArbaUtils.escapeHtml(al.action)}
+                        </span>
+                      </td>
+                      <td class="py-2.5 px-3">
+                        <div class="font-semibold text-on-surface">${window.ArbaUtils.escapeHtml(al.actor)}</div>
+                        <div class="text-[10px] text-on-surface-variant">${window.ArbaUtils.escapeHtml(al.actorRole)}</div>
+                      </td>
+                      <td class="py-2.5 px-3">
+                        <div class="font-semibold text-on-surface">${window.ArbaUtils.escapeHtml(al.productName || al.sku || '-')}</div>
+                        <div class="font-mono text-[10px] text-on-surface-variant">
+                          ${al.batch ? 'Batch: ' + window.ArbaUtils.escapeHtml(al.batch) : '-'}
+                          ${al.qty !== null && al.qty !== undefined ? ' • Qty: ' + window.ArbaUtils.escapeHtml(al.qty) : ''}
+                        </div>
+                      </td>
+                      <td class="py-2.5 px-3">
+                        <div class="font-medium text-on-surface">${window.ArbaUtils.escapeHtml(al.outletName || '-')}</div>
+                        ${al.outletId ? `<div class="font-mono text-[10px] text-on-surface-variant">${window.ArbaUtils.escapeHtml(al.outletId)}</div>` : ''}
+                      </td>
+                      <td class="py-2.5 px-3 max-w-[300px]">
+                        <div class="text-on-surface text-[11px]">${window.ArbaUtils.escapeHtml(al.details || '-')}</div>
+                        <div class="font-mono text-[10px] text-primary mt-0.5">Ref: ${window.ArbaUtils.escapeHtml(al.docRef || '-')} • #${window.ArbaUtils.escapeHtml(al.checksum || '')}</div>
+                      </td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
     `;
 
@@ -862,6 +986,27 @@
     if (ropSelect) {
       ropSelect.addEventListener('change', function (e) {
         state.selectedRopStatus = e.target.value;
+        renderInventoryLedger(container);
+      });
+    }
+
+    // Audit Log Terpisah Search & Filter
+    var auditSearch = container.querySelector('#audit-log-search');
+    if (auditSearch) {
+      auditSearch.addEventListener('input', function (e) {
+        state.auditSearchQuery = e.target.value;
+        renderInventoryLedger(container);
+        var inputNow = container.querySelector('#audit-log-search');
+        if (inputNow) {
+          inputNow.focus();
+          inputNow.setSelectionRange(inputNow.value.length, inputNow.value.length);
+        }
+      });
+    }
+    var auditFilterSel = container.querySelector('#audit-log-action-filter');
+    if (auditFilterSel) {
+      auditFilterSel.addEventListener('change', function (e) {
+        state.activeAuditFilter = e.target.value;
         renderInventoryLedger(container);
       });
     }

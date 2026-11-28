@@ -37,11 +37,11 @@
 
     <!-- Pure Vanilla Stylesheets -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous" media="print" onload="this.media='all'" />
-    <link rel="stylesheet" href="css/tokens.css?v=26" />
-    <link rel="stylesheet" href="css/layout.css?v=26" />
-    <link rel="stylesheet" href="css/components.css?v=26" />
-    <link rel="stylesheet" href="css/utilities.css?v=26" />
-    <link rel="stylesheet" href="css/print.css?v=26" />
+    <link rel="stylesheet" href="css/tokens.css?v=30" />
+    <link rel="stylesheet" href="css/layout.css?v=30" />
+    <link rel="stylesheet" href="css/components.css?v=30" />
+    <link rel="stylesheet" href="css/utilities.css?v=30" />
+    <link rel="stylesheet" href="css/print.css?v=30" />
   </head>
   <body>
     <!-- App Shell Container -->
@@ -253,6 +253,22 @@
 
       <!-- App Content Wrapper -->
       <div id="app-content-wrapper" class="app-content-wrapper">
+        <!-- Global Offline Mode & Sync Progress Banner (Terlihat di Semua Role) -->
+        <div id="global-sync-status-banner" class="global-sync-banner hidden" role="status" aria-live="polite">
+          <div class="global-sync-banner-row">
+            <div class="global-sync-banner-left">
+              <span id="global-sync-icon" class="material-symbols-outlined text-[18px]">cloud_sync</span>
+              <span id="global-sync-message" class="global-sync-text">Menyinkronkan data ke server pusat...</span>
+            </div>
+            <div class="global-sync-banner-actions">
+              <span id="global-sync-percent" class="global-sync-percent"></span>
+              <button id="global-sync-now-btn" type="button" class="global-sync-btn hidden">Sinkronkan Sekarang</button>
+            </div>
+          </div>
+          <div id="global-sync-progress-track" class="global-sync-progress-track hidden">
+            <div id="global-sync-progress-fill" class="global-sync-progress-fill" style="width: 0%;"></div>
+          </div>
+        </div>
         <main id="main-view-container" class="main-view-container"></main>
 
         <!-- Application Footer -->
@@ -292,18 +308,18 @@
 
     <!-- Pure Vanilla Scripts Loaded in Deterministic Dependency Order (Cache-Busted & Non-Blocking Defer) -->
     <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
-    <script defer src="js/data.js?v=26"></script>
-    <script defer src="js/utils.js?v=26"></script>
-    <script defer src="js/offlineSync.js?v=26"></script>
-    <script defer src="js/store.js?v=28"></script>
-    <script defer src="js/auth.js?v=28"></script>
-    <script defer src="js/advancedFeatures.js?v=26"></script>
-    <script defer src="js/views/executiveDashboard.js?v=26"></script>
-    <script defer src="js/views/inventoryLedger.js?v=26"></script>
-    <script defer src="js/views/b2bCrm.js?v=26"></script>
-    <script defer src="js/views/orderApproval.js?v=26"></script>
-    <script defer src="js/views/fieldSalesPwa.js?v=26"></script>
-    <script defer src="js/views/userProfileAndAdmin.js?v=26"></script>
-    <script defer src="js/app.js?v=26"></script>
+    <script defer src="js/data.js?v=30"></script>
+    <script defer src="js/utils.js?v=30"></script>
+    <script defer src="js/offlineSync.js?v=30"></script>
+    <script defer src="js/store.js?v=30"></script>
+    <script defer src="js/auth.js?v=30"></script>
+    <script defer src="js/advancedFeatures.js?v=30"></script>
+    <script defer src="js/views/executiveDashboard.js?v=30"></script>
+    <script defer src="js/views/inventoryLedger.js?v=30"></script>
+    <script defer src="js/views/b2bCrm.js?v=30"></script>
+    <script defer src="js/views/orderApproval.js?v=30"></script>
+    <script defer src="js/views/fieldSalesPwa.js?v=30"></script>
+    <script defer src="js/views/userProfileAndAdmin.js?v=30"></script>
+    <script defer src="js/app.js?v=30"></script>
   </body>
 </html>

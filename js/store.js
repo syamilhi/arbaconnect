@@ -41,6 +41,57 @@ window.ArbaStore = (function() {
     return (Array.isArray(arr) ? arr : []).map(sanitizeUserObj);
   }
 
+  function buildInitialAuditLogsLocal(dataSrc) {
+    const src = dataSrc || {};
+    const logs = [];
+    (src.ledger || []).slice(0, 12).forEach((l, idx) => {
+      const actionMap = {
+        MASUK: 'INBOUND_BATCH',
+        KELUAR: 'ORDER_DISPATCHED',
+        PENYESUAIAN: 'ADJUST_STOCK',
+        RETUR: 'ORDER_RETURN'
+      };
+      logs.push({
+        id: `AUD-INIT-${String(idx + 1).padStart(3, '0')}`,
+        timestamp: l.timestamp || '',
+        isoTime: new Date(Date.now() - (idx + 1) * 3600000).toISOString(),
+        action: actionMap[l.type] || 'STOCK_EVENT',
+        actor: l.operator || 'Sistem',
+        actorRole: l.operatorRole || 'Operasional Gudang',
+        outletId: null,
+        outletName: null,
+        sku: l.skuCode || null,
+        productName: l.skuName || null,
+        batch: l.batch || null,
+        qty: l.quantity || 0,
+        docRef: l.docRef || l.id,
+        details: `Mutasi ${l.type} ${l.quantity > 0 ? '+' : ''}${l.quantity} unit (Saldo akhir: ${l.finalStock})`,
+        checksum: l.hash || '0000...0000'
+      });
+    });
+    (src.orders || []).slice(0, 8).forEach((ord, idx) => {
+      const firstItem = (ord.items && ord.items[0]) || {};
+      logs.push({
+        id: `AUD-ORD-${String(idx + 1).padStart(3, '0')}`,
+        timestamp: ord.orderTime || '',
+        isoTime: new Date(ord.orderTimestamp || (Date.now() - (idx + 2) * 5400000)).toISOString(),
+        action: ord.status === 'APPROVED' ? 'ORDER_APPROVED' : (ord.status === 'REJECTED' ? 'ORDER_REJECTED' : 'ORDER_CREATED'),
+        actor: ord.salesRep || 'Sales Lapangan',
+        actorRole: `Field Sales ${ord.salesRepId || ''}`.trim(),
+        outletId: ord.outletId || null,
+        outletName: ord.outletName || null,
+        sku: firstItem.sku || null,
+        productName: firstItem.name || `${(ord.items || []).length} SKU`,
+        batch: firstItem.batch ? String(firstItem.batch).replace('Batch: ', '') : null,
+        qty: (ord.items || []).reduce((s, it) => s + (Number(it.quantity) || 0), 0),
+        docRef: ord.clientUuid || ord.id,
+        details: `Pesanan ${ord.outletName} (${(ord.items || []).length} SKU, status: ${ord.status})`,
+        checksum: `aud${idx + 1}...cdob`
+      });
+    });
+    return logs;
+  }
+
   // Load from local storage or fallback to ArbaData initial values
   function loadInitialState() {
     let hashPath = null;
@@ -71,6 +122,30 @@ window.ArbaStore = (function() {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
+        // Backfill otomatis atribut regulasi CDOB & FEFO dinamis jika localStorage berasal dari versi sebelumnya
+        const hydratedProducts = (parsed.products || ArbaData.products).map((p) => {
+          const mp = (ArbaData.products || []).find((x) => x.sku === p.sku);
+          if (!mp) return p;
+          return Object.assign({}, p, {
+            nieBpom: p.nieBpom || mp.nieBpom,
+            noHalal: p.noHalal || mp.noHalal,
+            storageTemp: p.storageTemp || mp.storageTemp,
+            fefoDate: p.fefoIsoDate ? p.fefoDate : mp.fefoDate,
+            fefoIsoDate: p.fefoIsoDate || mp.fefoIsoDate,
+            fefoDaysLeft: p.fefoIsoDate ? p.fefoDaysLeft : mp.fefoDaysLeft,
+            fefoStatus: p.fefoIsoDate ? p.fefoStatus : mp.fefoStatus
+          });
+        });
+        const hydratedOutlets = (parsed.outlets || ArbaData.outlets).map((o) => {
+          const mo = (ArbaData.outlets || []).find((x) => x.id === o.id);
+          if (!mo) return o;
+          return Object.assign({}, o, {
+            noSia: o.noSia || mo.noSia,
+            noSipa: o.noSipa || mo.noSipa,
+            sipaExpiry: o.sipaExpiry || mo.sipaExpiry,
+            sipaStatus: o.sipaStatus || mo.sipaStatus
+          });
+        });
         return {
           currentPath: hashPath || parsed.currentPath || 'executive-dashboard',
           currentRole: parsed.currentRole || 'executive',
@@ -80,9 +155,11 @@ window.ArbaStore = (function() {
           isDarkMode: overrideDarkMode !== null ? overrideDarkMode : (parsed.isDarkMode || false),
           isSidebarCollapsed: overrideSidebarCollapsed !== null ? overrideSidebarCollapsed : (parsed.isSidebarCollapsed !== undefined ? parsed.isSidebarCollapsed : true),
           selectedOutletId: parsed.selectedOutletId || 'AP-SLO-001',
-          products: parsed.products || ArbaData.products,
+          stateVersion: Number(parsed.stateVersion) || 1,
+          products: hydratedProducts,
           ledger: parsed.ledger || ArbaData.ledger,
-          outlets: parsed.outlets || ArbaData.outlets,
+          auditLogs: Array.isArray(parsed.auditLogs) ? parsed.auditLogs : buildInitialAuditLogsLocal(ArbaData),
+          outlets: hydratedOutlets,
           orders: parsed.orders || ArbaData.orders,
           supplierPOs: parsed.supplierPOs || ArbaData.supplierPOs,
           salesVisits: parsed.salesVisits || ArbaData.salesVisits,
@@ -107,8 +184,10 @@ window.ArbaStore = (function() {
       isDarkMode: overrideDarkMode !== null ? overrideDarkMode : false,
       isSidebarCollapsed: overrideSidebarCollapsed !== null ? overrideSidebarCollapsed : true,
       selectedOutletId: 'AP-SLO-001',
+      stateVersion: 1,
       products: JSON.parse(JSON.stringify(ArbaData.products)),
       ledger: JSON.parse(JSON.stringify(ArbaData.ledger)),
+      auditLogs: buildInitialAuditLogsLocal(ArbaData),
       outlets: JSON.parse(JSON.stringify(ArbaData.outlets)),
       orders: JSON.parse(JSON.stringify(ArbaData.orders)),
       supplierPOs: JSON.parse(JSON.stringify(ArbaData.supplierPOs)),
@@ -143,8 +222,10 @@ window.ArbaStore = (function() {
         isDarkMode: state.isDarkMode,
         isSidebarCollapsed: state.isSidebarCollapsed,
         selectedOutletId: state.selectedOutletId,
+        stateVersion: state.stateVersion || 1,
         products: state.products,
         ledger: state.ledger,
+        auditLogs: state.auditLogs || [],
         outlets: state.outlets,
         orders: state.orders,
         supplierPOs: state.supplierPOs,
@@ -730,9 +811,53 @@ window.ArbaStore = (function() {
   }
 
   function syncMutationToServer(type, payload, summary) {
+    state.stateVersion = Math.max(Date.now(), (Number(state.stateVersion) || 1) + 1);
+    persist();
     if (window.ArbaOfflineSync && typeof window.ArbaOfflineSync.recordOrSyncMutation === 'function') {
       window.ArbaOfflineSync.recordOrSyncMutation(type, payload, summary);
     }
+  }
+
+  function recordAuditLog(entry) {
+    if (!Array.isArray(state.auditLogs)) state.auditLogs = [];
+    const id = entry.id || `AUD-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+    const rec = {
+      id,
+      timestamp: entry.timestamp || nowStamp(),
+      isoTime: entry.isoTime || new Date().toISOString(),
+      action: entry.action || 'SYSTEM_EVENT',
+      actor: entry.actor || (state.currentUser && state.currentUser.name) || 'Sistem',
+      actorRole: entry.actorRole || (state.currentUser && state.currentUser.title) || '-',
+      outletId: entry.outletId || null,
+      outletName: entry.outletName || null,
+      sku: entry.sku || null,
+      productName: entry.productName || null,
+      batch: entry.batch || null,
+      qty: entry.qty !== undefined && entry.qty !== null ? Number(entry.qty) : null,
+      docRef: entry.docRef || null,
+      details: entry.details || '',
+      checksum: entry.checksum || pseudoHash(`${id}|${entry.action}|${entry.actor || ''}|${entry.sku || ''}|${entry.docRef || ''}`)
+    };
+    state.auditLogs = [rec, ...state.auditLogs].slice(0, 500);
+    return rec;
+  }
+
+  function isProductExpired(prod) {
+    if (!prod) return false;
+    if (prod.quarantined) return true;
+    if (typeof prod.fefoDaysLeft === 'number' && prod.fefoDaysLeft <= 0) return true;
+    if (prod.fefoIsoDate) {
+      const expMs = Date.parse(prod.fefoIsoDate);
+      if (!Number.isNaN(expMs) && expMs <= Date.now()) return true;
+    }
+    return false;
+  }
+
+  function isProductNearExpiry(prod) {
+    if (!prod) return false;
+    if (typeof prod.fefoDaysLeft === 'number' && prod.fefoDaysLeft > 0 && prod.fefoDaysLeft <= 30) return true;
+    if (/Kritis/i.test(String(prod.fefoStatus || ''))) return true;
+    return false;
   }
 
   function addOfflineQueueEntry(mutation) {
@@ -782,8 +907,10 @@ window.ArbaStore = (function() {
         state.currentUser = sanitizeUserObj(JSON.parse(JSON.stringify(refreshed)));
       }
     }
+    if (centralState.stateVersion) state.stateVersion = Number(centralState.stateVersion);
     if (Array.isArray(centralState.products)) state.products = centralState.products;
     if (Array.isArray(centralState.ledger)) state.ledger = centralState.ledger;
+    if (Array.isArray(centralState.auditLogs)) state.auditLogs = centralState.auditLogs;
     if (Array.isArray(centralState.outlets)) state.outlets = centralState.outlets;
     if (Array.isArray(centralState.orders)) state.orders = centralState.orders;
     if (Array.isArray(centralState.supplierPOs)) state.supplierPOs = centralState.supplierPOs;
@@ -909,7 +1036,18 @@ window.ArbaStore = (function() {
     };
 
     state.ledger = [newEntry, ...state.ledger];
-    showToast(`Penerimaan +${qty} unit (${batch}) berhasil dicatat ke Ledger!`, 'check_circle');
+    recordAuditLog({
+      action: 'INBOUND_BATCH',
+      actor: operatorName,
+      actorRole: operatorTitle,
+      sku,
+      productName: prodName,
+      batch,
+      qty,
+      docRef: newEntry.docRef,
+      details: `Penerimaan batch masuk +${qty} unit (ED: ${expiryDate || '-'}, Saldo akhir: ${newStock})`
+    });
+    showToast(`Penerimaan +${qty} unit (${batch}) berhasil dicatat ke Ledger & Audit Log!`, 'check_circle');
     notify();
     syncMutationToServer('ADD_INBOUND_BATCH', { sku, batch, qty, expiryDate, docRef, ledgerEntry: newEntry }, `Inbound +${qty} unit ${prodName} (${batch})`);
   }
@@ -917,6 +1055,13 @@ window.ArbaStore = (function() {
   function approveOrder(orderId, silent) {
     const order = state.orders.find(o => o.id === orderId || o.clientUuid === orderId);
     if (!order) return;
+
+    if (order.requiresExpiryOverride && order.expiryOverrideStatus === 'PENDING_OVERRIDE') {
+      if (!silent) {
+        showToast(`Pesanan ${order.outletName} mengandung produk Near-ED (<30 hari) — gunakan tombol "Setujui Override Mendesak"!`, 'warning');
+      }
+      return [];
+    }
 
     // Pesanan dari PWA (online) sudah memotong stok saat dibuat — jangan potong dua kali.
     let lowHits = [];
@@ -927,11 +1072,66 @@ window.ArbaStore = (function() {
     order.status = 'APPROVED';
     order.syncStatus = 'SYNCED_DEDUCTED';
 
+    (order.items || []).forEach(it => {
+      recordAuditLog({
+        action: 'ORDER_APPROVED',
+        outletId: order.outletId,
+        outletName: order.outletName,
+        sku: it.sku,
+        productName: it.name,
+        batch: String(it.batch || '-').replace('Batch: ', ''),
+        qty: it.quantity,
+        docRef: order.clientUuid || order.id,
+        details: `Faktur disetujui & dialokasikan ke armada untuk ${order.outletName}`
+      });
+    });
+
     if (!silent) {
       showToast(`Pesanan ${order.outletName} disetujui & dialokasikan ke armada.${lowStockMessage(lowHits)}`, 'task_alt');
       notify();
       syncMutationToServer('APPROVE_ORDER', { orderId: order.id, clientUuid: order.clientUuid }, `Otorisasi Pesanan ${order.outletName}`);
     }
+    return lowHits;
+  }
+
+  function approveExpiryOverride(orderId, reason) {
+    const order = state.orders.find(o => o.id === orderId || o.clientUuid === orderId);
+    if (!order) return;
+    const approverName = (state.currentUser && state.currentUser.name) || 'Admin Penjualan & Gudang';
+    const cleanReason = String(reason || order.expiryOverrideReason || 'Kebutuhan mendesak outlet, langsung dipakai sebelum tanggal kedaluwarsa').trim();
+
+    order.expiryOverrideStatus = 'APPROVED_OVERRIDE';
+    order.expiryOverrideReason = cleanReason;
+    order.expiryOverrideBy = approverName;
+    order.expiryOverrideAt = nowStamp();
+    order.stockWarning = undefined;
+
+    let lowHits = [];
+    if (!order.stockDeducted) {
+      lowHits = deductOrderStock(order);
+    }
+    order.status = 'APPROVED';
+    order.syncStatus = 'SYNCED_DEDUCTED';
+
+    (order.items || []).forEach(it => {
+      recordAuditLog({
+        action: 'NEAR_EXPIRY_OVERRIDE',
+        actor: approverName,
+        actorRole: (state.currentUser && state.currentUser.title) || 'Admin Penjualan / Gudang',
+        outletId: order.outletId,
+        outletName: order.outletName,
+        sku: it.sku,
+        productName: it.name,
+        batch: String(it.batch || '-').replace('Batch: ', ''),
+        qty: it.quantity,
+        docRef: order.clientUuid || order.id,
+        details: `Override Mendesak Near-ED disetujui untuk ${order.outletName}. Alasan: ${cleanReason}`
+      });
+    });
+
+    showToast(`Override Near-ED disetujui oleh ${approverName} & tercatat di Audit Log!${lowStockMessage(lowHits)}`, 'verified');
+    notify();
+    syncMutationToServer('APPROVE_EXPIRY_OVERRIDE', { orderId: order.id, reason: cleanReason, approverName }, `Override Near-ED ${order.outletName}`);
     return lowHits;
   }
 
@@ -949,6 +1149,16 @@ window.ArbaStore = (function() {
       if (order.stockDeducted) restoreOrderStock(order, reason);
       if (order.creditApplied) applyOutletCredit(order, -1);
       order.status = 'REJECTED';
+      if (order.requiresExpiryOverride) order.expiryOverrideStatus = 'REJECTED_OVERRIDE';
+      recordAuditLog({
+        action: 'ORDER_REJECTED',
+        outletId: order.outletId,
+        outletName: order.outletName,
+        sku: order.items && order.items[0] ? order.items[0].sku : null,
+        productName: order.items && order.items[0] ? order.items[0].name : null,
+        docRef: order.clientUuid || order.id,
+        details: `Pesanan ditolak/ditahan: ${reason || 'Pembatalan manual'}`
+      });
       showToast(`Pesanan #${orderId} ditolak: ${reason || 'Pembatalan manual'}${order.stockDeducted === false ? ' — stok dikembalikan' : ''}`, 'block');
       notify();
       syncMutationToServer('REJECT_ORDER', { orderId: order.id, reason }, `Tolak Pesanan ${order.outletName}`);
@@ -1183,17 +1393,44 @@ window.ArbaStore = (function() {
       items
     };
 
-    // 1) Sinkronisasi stok otomatis: potong stok saat pesanan dibuat (online)
+    // 1) Validasi barang Expired / Karantina (diblokir mutlak) & Near-ED (<30 hari -> tahan & wajib override Admin)
+    const blockedExpired = items.find(it => isProductExpired(findProduct(it.sku, it.name)));
+    if (blockedExpired) {
+      showToast(`Diblokir (CDOB): ${blockedExpired.name || blockedExpired.sku} sudah expired / dikarantina dan tidak boleh dijual!`, 'block');
+      return { blocked: true, reason: 'EXPIRED_OR_QUARANTINED' };
+    }
+
+    const nearExpiryItems = [];
+    items.forEach(it => {
+      const prod = findProduct(it.sku, it.name);
+      if (isProductNearExpiry(prod)) {
+        nearExpiryItems.push(`${prod.name} (${prod.activeBatch}, ED ${prod.fefoDate})`);
+      }
+    });
+    if (nearExpiryItems.length > 0) {
+      orderObj.requiresExpiryOverride = true;
+      orderObj.expiryOverrideStatus = 'PENDING_OVERRIDE';
+      orderObj.expiryOverrideItems = nearExpiryItems;
+      orderObj.expiryOverrideReason = newOrder.expiryOverrideReason || newOrder.notes || 'Outlet memerlukan segera untuk pemakaian langsung sebelum ED';
+      orderObj.priority = 'High';
+    }
+
+    // 1B) Sinkronisasi stok otomatis: potong stok saat pesanan dibuat (online), kecuali jika ditahan karena Near-ED
     let lowHits = [];
     let shortages = [];
     if (state.isOnline) {
-      shortages = checkStockAvailability(items);
-      if (shortages.length === 0) {
-        lowHits = deductOrderStock(orderObj);
+      if (orderObj.requiresExpiryOverride) {
+        orderObj.syncStatus = 'PENDING_EXPIRY_OVERRIDE';
+        orderObj.stockWarning = 'Ditahan (Near-ED): Membutuhkan persetujuan override mendesak Admin Penjualan/Gudang untuk ' + nearExpiryItems.join(', ');
       } else {
-        orderObj.syncStatus = 'PENDING_WAREHOUSE';
-        orderObj.priority = 'High';
-        orderObj.stockWarning = 'Menunggu stok: ' + shortages.map(s => `${s.name} (kurang ${s.shortBy} unit)`).join(', ');
+        shortages = checkStockAvailability(items);
+        if (shortages.length === 0) {
+          lowHits = deductOrderStock(orderObj);
+        } else {
+          orderObj.syncStatus = 'PENDING_WAREHOUSE';
+          orderObj.priority = 'High';
+          orderObj.stockWarning = 'Menunggu stok: ' + shortages.map(s => `${s.name} (kurang ${s.shortBy} unit)`).join(', ');
+        }
       }
     } else {
       state.offlineQueue = [{
@@ -1258,6 +1495,23 @@ window.ArbaStore = (function() {
     }
 
     state.orders = [orderObj, ...state.orders];
+    items.forEach(it => {
+      recordAuditLog({
+        action: orderObj.requiresExpiryOverride ? 'ORDER_NEAR_ED_HELD' : 'ORDER_CREATED',
+        actor: orderObj.salesRep,
+        actorRole: `Field Sales ${orderObj.salesRepId || ''}`.trim(),
+        outletId: orderObj.outletId,
+        outletName: orderObj.outletName,
+        sku: it.sku,
+        productName: it.name,
+        batch: String(it.batch || '-').replace('Batch: ', ''),
+        qty: it.quantity,
+        docRef: orderObj.clientUuid,
+        details: orderObj.requiresExpiryOverride
+          ? `Order ditahan (Near-ED) menunggu override Admin. Alasan: ${orderObj.expiryOverrideReason}`
+          : `Order ${it.quantity} unit ke ${orderObj.outletName} (${orderObj.terms}) • Sync: ${orderObj.syncStatus}`
+      });
+    });
 
     // 3) Catat aktivitas kunjungan (hasil: ORDER) untuk KPI produktivitas sales
     const visitLog = recordVisit({
@@ -1272,7 +1526,9 @@ window.ArbaStore = (function() {
 
     let msg;
     if (!state.isOnline) {
-      msg = 'Pesanan disimpan di offline storage lokal (stok dipotong otomatis saat online kembali)';
+      msg = 'Pesanan disimpan di IndexedDB lokal (stok dipotong otomatis saat online kembali)';
+    } else if (orderObj.requiresExpiryOverride) {
+      msg = `Pesanan ${orderObj.outletName} DITAHAN (Near-ED <30 hari) — menunggu persetujuan override mendesak Admin Penjualan/Gudang.`;
     } else if (shortages.length) {
       msg = `Pesanan ${orderObj.outletName} masuk antrean "Menunggu Stok" — ${shortages.length} SKU kurang`;
     } else {
@@ -2673,12 +2929,23 @@ window.ArbaStore = (function() {
       hash: pseudoHash(`${ledgerId}|${product.sku}|${product.activeBatch}|QUARANTINE|${prevStock}`)
     });
 
+    recordAuditLog({
+      action: 'BATCH_RECALL_QUARANTINE',
+      actor: operatorName,
+      actorRole: 'QA / CDOB Recall Officer',
+      sku: product.sku,
+      productName: product.name,
+      batch: product.activeBatch,
+      qty: prevStock,
+      docRef: `RECALL-${product.activeBatch}`,
+      details: `Karantina & Batch Recall CDOB: ${product.quarantineReason}`
+    });
+
     showToast(`Batch ${product.activeBatch} (${product.name}) resmi dikarantina & dikunci dari distribusi!`, 'gpp_maybe');
     notify();
-    syncMutationToServer('ADJUST_STOCK', {
+    syncMutationToServer('QUARANTINE_BATCH', {
       sku: product.sku,
-      delta: 0,
-      reason: `KARANTINA CDOB: ${product.quarantineReason}`,
+      reason: product.quarantineReason,
       batch: product.activeBatch
     }, `Karantina Batch ${product.activeBatch}`);
     return product;
@@ -2714,8 +2981,12 @@ window.ArbaStore = (function() {
     showToast,
     addInboundBatch,
     approveOrder,
+    approveExpiryOverride,
     batchApproveOrders,
     rejectOrder,
+    recordAuditLog,
+    isProductExpired,
+    isProductNearExpiry,
     substituteOrderBatch,
     adjustOrderQuantity,
     adjustStock,

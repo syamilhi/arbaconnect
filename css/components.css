@@ -452,5 +452,143 @@
   to { opacity: 1; transform: translateX(0); }
 }
 
+/* Global Offline Mode & Sync Progress Banner (Semua Role) */
+.global-sync-banner {
+  margin: 0.75rem 1.25rem 0 1.25rem;
+  padding: 0.65rem 1rem;
+  border-radius: 12px;
+  border: 1px solid var(--color-border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.global-sync-banner.sync-offline {
+  background-color: #fffbeb;
+  border-color: #fcd34d;
+  color: #92400e;
+}
+
+.global-sync-banner.sync-syncing {
+  background-color: #f0fdfa;
+  border-color: #5eead4;
+  color: #0f766e;
+}
+
+.global-sync-banner.sync-success {
+  background-color: #ecfdf5;
+  border-color: #6ee7b7;
+  color: #065f46;
+}
+
+.global-sync-banner.sync-error {
+  background-color: #fff1f2;
+  border-color: #fda4af;
+  color: #9f1239;
+}
+
+.global-sync-banner-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.global-sync-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.global-sync-text {
+  line-height: 1.35;
+}
+
+.global-sync-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.global-sync-percent {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.global-sync-btn {
+  background-color: #005c55;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.global-sync-btn:hover {
+  background-color: #0f766e;
+}
+
+.global-sync-progress-track {
+  width: 100%;
+  height: 5px;
+  background-color: rgba(15, 118, 110, 0.16);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.global-sync-progress-fill {
+  height: 100%;
+  background-color: #0f766e;
+  border-radius: 999px;
+  transition: width 0.35s ease;
+}
+
+/* Mobile-First Responsiveness untuk Semua Role (Admin Gudang, Admin Penjualan, Direktur) */
+@media (max-width: 768px) {
+  .global-sync-banner {
+    margin: 0.5rem 0.75rem 0 0.75rem;
+    padding: 0.6rem 0.75rem;
+    font-size: 0.72rem;
+  }
+
+  .main-view-container {
+    padding: 0.75rem !important;
+  }
+
+  .main-view-container table {
+    min-width: 620px;
+  }
+
+  .main-view-container .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .modal-content,
+  .modal-card {
+    width: calc(100vw - 1.25rem) !important;
+    max-width: 100% !important;
+    max-height: 92vh !important;
+    overflow-y: auto;
+  }
+
+  .toast-popup {
+    left: 0.75rem;
+    right: 0.75rem;
+    bottom: 0.75rem;
+    font-size: 0.76rem;
+  }
+}
+
 /* Layout & color utilities have been moved to css/utilities.css */
 

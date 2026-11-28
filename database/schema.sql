@@ -105,7 +105,10 @@ CREATE TABLE orders (
     tanggal         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     jatuh_tempo     DATE,
     termin          VARCHAR(32) NOT NULL DEFAULT 'Net 30 Hari',
-    status          VARCHAR(24) NOT NULL CHECK (status IN ('draft', 'menunggu_stok', 'dikonfirmasi', 'dikirim', 'selesai', 'batal')),
+    status          VARCHAR(24) NOT NULL CHECK (status IN ('draft', 'menunggu_stok', 'menunggu_override_ed', 'dikonfirmasi', 'dikirim', 'selesai', 'batal')),
+    expiry_override_required BOOLEAN NOT NULL DEFAULT FALSE,
+    expiry_override_reason   TEXT,
+    expiry_override_by       VARCHAR(120),
     total           BIGINT NOT NULL DEFAULT 0
 );
 
@@ -144,6 +147,26 @@ CREATE TABLE alerts (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- 11. Tabel Audit Log Terpisah (Pelacakan Siklus Hidup Barang & Jejak Audit CDOB/BPOM)
+CREATE TABLE audit_logs (
+    id              VARCHAR(48) PRIMARY KEY,
+    action          VARCHAR(48) NOT NULL,
+    actor           VARCHAR(120) NOT NULL,
+    actor_role      VARCHAR(64) NOT NULL,
+    outlet_id       VARCHAR(32),
+    outlet_name     VARCHAR(160),
+    product_sku     VARCHAR(40),
+    product_name    VARCHAR(160),
+    no_batch        VARCHAR(48),
+    qty             INTEGER,
+    doc_ref         VARCHAR(64),
+    details         TEXT,
+    checksum_hash   VARCHAR(32) NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX idx_orders_outlet_tanggal ON orders(outlet_id, tanggal DESC);
 CREATE INDEX idx_visits_sales_checkin  ON visits(sales_id, checkin_at DESC);
 CREATE INDEX idx_ledger_product_time   ON stock_ledger(product_id, created_at DESC);
+CREATE INDEX idx_audit_logs_sku_batch  ON audit_logs(product_sku, no_batch, created_at DESC);
+CREATE INDEX idx_audit_logs_actor_time ON audit_logs(actor, created_at DESC);

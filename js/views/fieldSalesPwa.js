@@ -470,17 +470,21 @@
                   ${filteredProducts.map(function (prod) {
                     var qty = state.cart[prod.sku] || 0;
                     var isLow = prod.stock <= prod.rop;
-                    var atMax = qty >= prod.stock;
+                    var isExpiredBlocked = window.ArbaStore && window.ArbaStore.isProductExpired && window.ArbaStore.isProductExpired(prod);
+                    var isNearEd = !isExpiredBlocked && window.ArbaStore && window.ArbaStore.isProductNearExpiry && window.ArbaStore.isProductNearExpiry(prod);
+                    var atMax = qty >= prod.stock || isExpiredBlocked;
                     var consItem = (currentOutlet.consignmentItems || []).find(function (c) { return c.sku === prod.sku; });
 
                     return `
                       <div
                         class="p-2.5 rounded-xl border transition-colors flex items-center justify-between gap-2.5 mb-2 ${
-                          qty > 0
-                            ? 'bg-teal-50/50 border-teal-200'
-                            : 'bg-white border-slate-200'
+                          isExpiredBlocked
+                            ? 'bg-rose-50/70 border-rose-300 opacity-80'
+                            : (qty > 0
+                              ? 'bg-teal-50/50 border-teal-200'
+                              : 'bg-white border-slate-200')
                         }"
-                        style="border: 1px solid ${qty > 0 ? '#99f6e4' : '#e2e8f0'}; background:${qty > 0 ? '#f0fdfa' : '#fff'}; border-radius:12px; padding:0.65rem;"
+                        style="border: 1px solid ${isExpiredBlocked ? '#fda4af' : (qty > 0 ? '#99f6e4' : '#e2e8f0')}; background:${isExpiredBlocked ? '#fff1f2' : (qty > 0 ? '#f0fdfa' : '#fff')}; border-radius:12px; padding:0.65rem;"
                       >
                         <div class="min-w-0 flex-1">
                           <div class="font-semibold text-xs text-slate-900 truncate">
@@ -493,6 +497,11 @@
                             <span>·</span>
                             <span class="font-mono text-slate-500">Gudang: ${prod.stock}</span>
                           </div>
+                          ${isExpiredBlocked ? `
+                            <div class="text-[10px] font-bold mt-0.5" style="color:#be123c;">⛔ Diblokir (Expired / Karantina CDOB)</div>
+                          ` : isNearEd ? `
+                            <div class="text-[10px] font-bold mt-0.5" style="color:#b45309;">⚠ Near-ED (${window.ArbaUtils.escapeHtml(prod.fefoDate)}) — Ditahan, butuh Override Admin</div>
+                          ` : ''}
                           ${consItem ? `
                             <div class="text-[10px] font-semibold mt-0.5 truncate" style="color:${consItem.nearExpiry ? '#be185d' : '#0f766e'};">
                               Titipan: ${consItem.soldQty}/${consItem.consignedQty} laku · Sisa ${consItem.remainingQty}${consItem.nearExpiry ? ' · ED' : ''}

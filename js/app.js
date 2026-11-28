@@ -13,7 +13,7 @@
       if (typeof window !== 'undefined' && 'caches' in window) {
         window.caches.keys().then(function (keys) {
           keys.forEach(function (k) {
-            if (k.indexOf('arbaconnect-pwa-') === 0 && k !== 'arbaconnect-pwa-v29') {
+            if (k.indexOf('arbaconnect-pwa-') === 0 && k !== 'arbaconnect-pwa-v30') {
               window.caches.delete(k);
             }
           });
@@ -28,6 +28,7 @@
       this.bindHeader();
       this.bindSidebar();
       this.bindGlobalKeyboard();
+      this.bindSyncProgressBanner();
       this.subscribeStore();
       this.render();
       if (window.ArbaOfflineSync && typeof window.ArbaOfflineSync.init === 'function') {
@@ -594,12 +595,13 @@
         var qLen = (state.offlineQueue && state.offlineQueue.length) || 0;
         if (state.isOnline) {
           statusDot.className = 'status-dot online';
-          statusText.textContent = 'Tersinkron';
+          statusText.textContent = qLen > 0 ? 'Sinkron (' + qLen + ')' : 'Tersinkron';
         } else {
           statusDot.className = 'status-dot offline';
-          statusText.textContent = qLen > 0 ? 'Mode Lokal (' + qLen + ')' : 'Mode Lokal';
+          statusText.textContent = qLen > 0 ? 'Mode Offline (' + qLen + ')' : 'Mode Offline';
         }
       }
+      this.syncOfflineBannerFromState(state);
 
       // Dark mode icon
       var darkIcon = document.getElementById('header-dark-icon');
@@ -790,6 +792,123 @@
           }
         }
       });
+    },
+
+    // Global Offline Mode & Sync Progress Banner Controller
+    bindSyncProgressBanner: function () {
+      var self = this;
+      var syncBtn = document.getElementById('global-sync-now-btn');
+      if (syncBtn) {
+        syncBtn.addEventListener('click', function () {
+          if (window.ArbaStore && typeof window.ArbaStore.syncNow === 'function') {
+            window.ArbaStore.syncNow();
+          }
+        });
+      }
+
+      window.addEventListener('arba:sync-progress', function (e) {
+        var d = (e && e.detail) || {};
+        self.renderSyncBanner(d);
+      });
+    },
+
+    syncOfflineBannerFromState: function (state) {
+      if (!state || !state.currentUser) {
+        var b = document.getElementById('global-sync-status-banner');
+        if (b) b.classList.add('hidden');
+        return;
+      }
+      var qLen = (state.offlineQueue && state.offlineQueue.length) || 0;
+      if (!state.isOnline) {
+        this.renderSyncBanner({
+          phase: 'offline',
+          current: 0,
+          total: qLen,
+          message: 'Mode Offline Aktif — Anda sedang bekerja tanpa jaringan. ' +
+            (qLen > 0 ? qLen + ' transaksi tersimpan aman di IndexedDB lokal.' : 'Transaksi akan disimpan di IndexedDB lokal.')
+        });
+      } else if (qLen > 0) {
+        this.renderSyncBanner({
+          phase: 'offline',
+          current: 0,
+          total: qLen,
+          message: qLen + ' transaksi lokal menunggu sinkronisasi ke Server Pusat.'
+        });
+      } else if (this._lastSyncPhase === 'offline') {
+        var banner = document.getElementById('global-sync-status-banner');
+        if (banner) banner.classList.add('hidden');
+        this._lastSyncPhase = 'idle';
+      }
+    },
+
+    renderSyncBanner: function (detail) {
+      var banner = document.getElementById('global-sync-status-banner');
+      var iconEl = document.getElementById('global-sync-icon');
+      var msgEl = document.getElementById('global-sync-message');
+      var pctEl = document.getElementById('global-sync-percent');
+      var btnEl = document.getElementById('global-sync-now-btn');
+      var trackEl = document.getElementById('global-sync-progress-track');
+      var fillEl = document.getElementById('global-sync-progress-fill');
+      if (!banner || !msgEl) return;
+
+      var st = window.ArbaStore ? window.ArbaStore.getState() : null;
+      if (!st || !st.currentUser) {
+        banner.classList.add('hidden');
+        return;
+      }
+
+      if (this._syncBannerHideTimer) {
+        clearTimeout(this._syncBannerHideTimer);
+        this._syncBannerHideTimer = null;
+      }
+
+      var phase = detail.phase || 'idle';
+      this._lastSyncPhase = phase;
+      banner.classList.remove('hidden', 'sync-offline', 'sync-syncing', 'sync-success', 'sync-error');
+
+      var total = Math.max(1, Number(detail.total) || 1);
+      var current = Math.max(0, Number(detail.current) || 0);
+
+      if (phase === 'offline') {
+        banner.classList.add('sync-offline');
+        if (iconEl) iconEl.textContent = 'cloud_off';
+        msgEl.textContent = detail.message || 'Mode Offline Aktif — Transaksi disimpan di IndexedDB lokal.';
+        if (pctEl) pctEl.textContent = '';
+        if (btnEl) btnEl.classList.remove('hidden');
+        if (trackEl) trackEl.classList.add('hidden');
+      } else if (phase === 'syncing') {
+        banner.classList.add('sync-syncing');
+        if (iconEl) iconEl.textContent = 'sync';
+        msgEl.textContent = detail.message || 'Menyinkronkan data ke server pusat...';
+        var pct = Math.min(95, Math.max(35, Math.round((current / total) * 100)));
+        if (pctEl) pctEl.textContent = pct + '%';
+        if (btnEl) btnEl.classList.add('hidden');
+        if (trackEl) trackEl.classList.remove('hidden');
+        if (fillEl) fillEl.style.width = pct + '%';
+      } else if (phase === 'success') {
+        banner.classList.add('sync-success');
+        if (iconEl) iconEl.textContent = 'cloud_done';
+        msgEl.textContent = detail.message || 'Sinkronisasi sukses!';
+        if (pctEl) pctEl.textContent = '100%';
+        if (btnEl) btnEl.classList.add('hidden');
+        if (trackEl) trackEl.classList.remove('hidden');
+        if (fillEl) fillEl.style.width = '100%';
+        this._syncBannerHideTimer = setTimeout(function () {
+          var stNow = window.ArbaStore ? window.ArbaStore.getState() : null;
+          if (stNow && stNow.isOnline && (!stNow.offlineQueue || stNow.offlineQueue.length === 0)) {
+            banner.classList.add('hidden');
+          }
+        }, 4000);
+      } else if (phase === 'error') {
+        banner.classList.add('sync-error');
+        if (iconEl) iconEl.textContent = 'sync_problem';
+        msgEl.textContent = detail.message || 'Sinkronisasi tertunda — data diamankan di IndexedDB lokal.';
+        if (pctEl) pctEl.textContent = '';
+        if (btnEl) btnEl.classList.remove('hidden');
+        if (trackEl) trackEl.classList.add('hidden');
+      } else {
+        banner.classList.add('hidden');
+      }
     },
 
     // Modal Manager

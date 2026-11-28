@@ -483,6 +483,26 @@
                         </div>
                       </div>
 
+                      <!-- Banner Peringatan Near-ED Override Mendesak -->
+                      ${order.requiresExpiryOverride ? `
+                        <div class="my-3 p-3 rounded-xl border flex flex-wrap items-center justify-between gap-2 text-xs" style="${order.expiryOverrideStatus === 'APPROVED_OVERRIDE' ? 'background:#ecfdf5; border-color:#a7f3d0; color:#065f46;' : 'background:#fffbeb; border-color:#fcd34d; color:#92400e;'}">
+                          <div class="flex items-start gap-2.5">
+                            <span class="material-symbols-outlined text-[20px] shrink-0">${order.expiryOverrideStatus === 'APPROVED_OVERRIDE' ? 'verified_user' : 'event_busy'}</span>
+                            <div>
+                              <div class="font-bold">
+                                ${order.expiryOverrideStatus === 'APPROVED_OVERRIDE'
+                                  ? 'Override Mendesak Near-ED Disetujui oleh ' + window.ArbaUtils.escapeHtml(order.expiryOverrideBy || 'Admin')
+                                  : 'Pesanan Ditahan (Near-ED <30 Hari) — Wajib Persetujuan Override Admin Penjualan/Gudang'}
+                              </div>
+                              <div class="text-[11px] mt-0.5">
+                                Alasan Mendesak Outlet: <b>${window.ArbaUtils.escapeHtml(order.expiryOverrideReason || order.notes || 'Kebutuhan segera sebelum tanggal ED')}</b>
+                                ${order.expiryOverrideAt ? ' • ' + window.ArbaUtils.escapeHtml(order.expiryOverrideAt) : ''}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ` : ''}
+
                       <!-- Bukti Tanda Tangan Digital Apoteker & Foto Audit Etalase (Bila Ada dari PWA) -->
                       ${(window.ArbaUtils.safeImageDataUrl(order.signatureDataUrl) || window.ArbaUtils.safeImageDataUrl(order.shelfPhotoDataUrl)) ? `
                         <div class="my-3 p-3 rounded-xl bg-emerald-50/70 border border-emerald-200 flex flex-wrap items-center justify-between gap-3 text-xs">
@@ -689,8 +709,18 @@
                             <span>Cetak Surat Jalan &amp; Faktur B2B</span>
                           </button>
 
-                          <!-- Primary Approve -->
-                          ${order.status === 'PENDING' ? `
+                          <!-- Primary Approve / Near-ED Override -->
+                          ${order.status === 'PENDING' && order.requiresExpiryOverride && order.expiryOverrideStatus === 'PENDING_OVERRIDE' ? `
+                            <button
+                              class="btn-approve-expiry-override px-space-lg py-2.5 px-4 rounded-lg text-white font-label-lg text-label-lg flex items-center gap-2 shadow-sm hover:shadow-md transition-all active:scale-[0.98] cursor-pointer text-xs font-semibold border-0"
+                              style="background:#d97706;"
+                              data-order-id="${order.id}"
+                              type="button"
+                            >
+                              <span class="material-symbols-outlined text-[20px]">verified_user</span>
+                              <span>Setujui Override Mendesak (Near-ED)</span>
+                            </button>
+                          ` : order.status === 'PENDING' ? `
                             <button
                               class="btn-approve-single px-space-lg py-2.5 px-4 rounded-lg bg-primary text-white hover:bg-primary-container font-label-lg text-label-lg flex items-center gap-2 shadow-sm hover:shadow-md transition-all active:scale-[0.98] cursor-pointer text-xs font-semibold border-0"
                               data-order-id="${order.id}"
@@ -702,7 +732,7 @@
                           ` : `
                             <span class="px-4 py-2.5 rounded-lg bg-status-success-bg text-status-success-text font-semibold text-xs flex items-center gap-1.5">
                               <span class="material-symbols-outlined text-[18px]">task_alt</span>
-                              Telah Dikonfirmasi Gudang
+                              ${order.expiryOverrideStatus === 'APPROVED_OVERRIDE' ? 'Disetujui via Override Near-ED' : 'Telah Dikonfirmasi Gudang'}
                             </span>
                           `}
                         </div>
@@ -1026,6 +1056,24 @@
         state.selectedOrderIds = [];
       });
     }
+
+    // Override Mendesak Near-ED (Khusus Admin Penjualan / Gudang / Direktur / Super Admin)
+    var overrideBtns = container.querySelectorAll('.btn-approve-expiry-override');
+    overrideBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var orderId = btn.getAttribute('data-order-id');
+        var ord = window.ArbaStore.getState().orders.find(function (o) { return o.id === orderId; });
+        var defaultReason = (ord && (ord.expiryOverrideReason || ord.notes)) || 'Outlet membutuhkan segera untuk pemakaian langsung sebelum tanggal ED';
+        var reason = window.prompt(
+          'PERSETUJUAN OVERRIDE MENDESAK (BARANG MENDEKATI ED):\n\n' +
+          'Pastikan produk BELUM melewati tanggal kedaluwarsa dan outlet benar-benar membutuhkan segera.\n' +
+          'Masukkan catatan/alasan persetujuan (akan dicatat ke Audit Log Terpisah):',
+          defaultReason
+        );
+        if (reason === null) return;
+        window.ArbaStore.approveExpiryOverride(orderId, reason || defaultReason);
+      });
+    });
 
     // Single Approve dengan Guardrail Kepatuhan CDOB (FEFO Kritis, Kredit Overdue, Legalitas SIPA)
     var approveBtns = container.querySelectorAll('.btn-approve-single');

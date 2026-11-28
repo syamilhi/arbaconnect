@@ -27,11 +27,26 @@ window.ArbaOfflineSync = (function () {
 
   let dbPromise = null;
   let sseConnection = null;
+  let pollTimer = null;
   let isSyncing = false;
   let serverAvailable = false;
+  let serverStorageMode = 'unknown';
+  let lastKnownServerVersion = 0;
   let lastSyncTimestamp = null;
   let deferredInstallPrompt = null;
   let authTokenMemory = null;
+
+  function emitSyncProgress(detail) {
+    if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return;
+    try {
+      window.dispatchEvent(new CustomEvent('arba:sync-progress', {
+        detail: Object.assign({
+          timestamp: Date.now(),
+          storageMode: serverStorageMode
+        }, detail || {})
+      }));
+    } catch (e) {}
+  }
 
   function setAuthToken(token) {
     authTokenMemory = token || null;
@@ -255,7 +270,19 @@ window.ArbaOfflineSync = (function () {
       const data = await res.json();
       serverAvailable = true;
       lastSyncTimestamp = Date.now();
+      if (data && data.storageMode) serverStorageMode = data.storageMode;
+      const remoteVer = Number((data && data.stateVersion) || (data && data.state && data.state.stateVersion) || 1);
+      const localState = window.ArbaStore ? window.ArbaStore.getState() : null;
+      const localVer = Number((localState && localState.stateVersion) || 1);
+
+      // Anti-overwrite di Vercel Ephemeral: jika serverless container baru saja cold-start (versi 1)
+      // sedangkan browser sudah memiliki data mutasi lokal lebih baru (localVer > 1), JANGAN timpa data lokal!
+      if (serverStorageMode === 'serverless-ephemeral' && remoteVer <= 1 && localVer > 1) {
+        return null;
+      }
+
       if (data && data.state) {
+        lastKnownServerVersion = remoteVer;
         await saveSnapshotToIDB(data.state);
         return data.state;
       }
@@ -294,6 +321,13 @@ window.ArbaOfflineSync = (function () {
       if (window.ArbaStore && typeof window.ArbaStore.addOfflineQueueEntry === 'function') {
         window.ArbaStore.addOfflineQueueEntry(mutation);
       }
+      const qCount = (window.ArbaStore && window.ArbaStore.getState().offlineQueue || []).length;
+      emitSyncProgress({
+        phase: 'offline',
+        current: 0,
+        total: qCount,
+        message: `Mode Offline aktif — ${qCount} transaksi tersimpan aman di IndexedDB lokal.`
+      });
       registerBackgroundSync();
       return { queuedOffline: true, mutationId };
     }
@@ -301,6 +335,12 @@ window.ArbaOfflineSync = (function () {
     // Antrekan request ke server secara berurutan agar tidak saling balapan (race condition)
     const runSync = async () => {
       try {
+        emitSyncProgress({
+          phase: 'syncing',
+          current: 0,
+          total: 1,
+          message: `Menyinkronkan ke server pusat: ${mutation.summary || mutation.type}...`
+        });
         const currentSnapshot = window.ArbaStore ? sanitizeStateForStorage(window.ArbaStore.getState()) : null;
         if (currentSnapshot) {
           await saveSnapshotToIDB(currentSnapshot);
@@ -320,8 +360,24 @@ window.ArbaOfflineSync = (function () {
         if (data && data.refreshedToken) {
           setAuthToken(data.refreshedToken);
         }
+        if (data && data.storageMode) serverStorageMode = data.storageMode;
+        if (data && data.stateVersion) lastKnownServerVersion = Number(data.stateVersion);
+        if (data && data.state) {
+          await saveSnapshotToIDB(data.state);
+          if (window.ArbaStore && typeof window.ArbaStore.applyServerState === 'function' && Array.isArray(data.state.auditLogs)) {
+            const stNow = window.ArbaStore.getState();
+            stNow.stateVersion = data.stateVersion || Date.now();
+            stNow.auditLogs = data.state.auditLogs;
+          }
+        }
         serverAvailable = true;
         lastSyncTimestamp = Date.now();
+        emitSyncProgress({
+          phase: 'success',
+          current: 1,
+          total: 1,
+          message: `Sinkronisasi sukses: ${mutation.summary || mutation.type}`
+        });
         return { queuedOffline: false, synced: true, mutationId, serverResponse: data };
       } catch (err) {
         serverAvailable = false;
@@ -329,6 +385,12 @@ window.ArbaOfflineSync = (function () {
         if (window.ArbaStore && typeof window.ArbaStore.addOfflineQueueEntry === 'function') {
           window.ArbaStore.addOfflineQueueEntry(mutation);
         }
+        emitSyncProgress({
+          phase: 'error',
+          current: 0,
+          total: 1,
+          message: `Gagal terhubung ke server (${err.message}) — transaksi diamankan di antrean lokal IndexedDB.`
+        });
         registerBackgroundSync();
         return { queuedOffline: true, mutationId, error: err.message };
       }
@@ -371,10 +433,25 @@ window.ArbaOfflineSync = (function () {
 
       const allMutations = Array.from(mergedMap.values()).sort((a, b) => a.createdAt - b.createdAt);
 
+      emitSyncProgress({
+        phase: 'syncing',
+        current: 0,
+        total: Math.max(1, allMutations.length),
+        message: allMutations.length > 0
+          ? `Menyinkronkan ${allMutations.length} transaksi lokal ke Server Pusat...`
+          : 'Memeriksa pembaruan data dari Server Pusat...'
+      });
+
       if (!isHttpOrigin()) {
         // Jika dijalankan via file:// tanpa backend HTTP, bersihkan antrean di memori lokal
         await clearIDBQueue();
         isSyncing = false;
+        emitSyncProgress({
+          phase: 'success',
+          current: Math.max(1, allMutations.length),
+          total: Math.max(1, allMutations.length),
+          message: `Sinkronisasi lokal selesai (${allMutations.length} transaksi).`
+        });
         return { syncedCount: allMutations.length, localOnly: true };
       }
 
@@ -394,27 +471,76 @@ window.ArbaOfflineSync = (function () {
       const data = await res.json();
       serverAvailable = true;
       lastSyncTimestamp = Date.now();
+      if (data && data.storageMode) serverStorageMode = data.storageMode;
+      const remoteVer = Number((data && data.stateVersion) || (data && data.state && data.state.stateVersion) || 1);
+      const localVer = Number((storeState && storeState.stateVersion) || 1);
 
       await removeMutationsFromIDB(allMutations.map((m) => m.mutationId));
       await clearIDBQueue();
 
-      if (data && data.state && window.ArbaStore && typeof window.ArbaStore.applyServerState === 'function') {
+      const shouldApplyServerState = !(
+        serverStorageMode === 'serverless-ephemeral' &&
+        allMutations.length === 0 &&
+        remoteVer <= 1 &&
+        localVer > 1
+      );
+
+      if (shouldApplyServerState && data && data.state && window.ArbaStore && typeof window.ArbaStore.applyServerState === 'function') {
+        lastKnownServerVersion = remoteVer;
         await saveSnapshotToIDB(data.state);
         window.ArbaStore.applyServerState(data.state, {
           clearQueue: true,
           toastMessage: allMutations.length > 0
-            ? `Sinkronisasi Pusat Berhasil: ${allMutations.length} transaksi lokal telah masuk ke Database Pusat!`
-            : (options.showToastIfEmpty ? 'Terhubung ke Server Pusat: Data telah mutakhir' : null)
+            ? `Sinkronisasi sukses! ${allMutations.length} transaksi lokal telah terintegrasi ke Database Pusat.`
+            : (options.showToastIfEmpty ? 'Sinkronisasi sukses: Data telah mutakhir dengan Server Pusat.' : null)
         });
       }
+
+      emitSyncProgress({
+        phase: 'success',
+        current: Math.max(1, allMutations.length),
+        total: Math.max(1, allMutations.length),
+        message: allMutations.length > 0
+          ? `Sinkronisasi sukses! ${allMutations.length} transaksi terintegrasi ke pusat.`
+          : 'Sinkronisasi sukses — seluruh data mutakhir.'
+      });
 
       isSyncing = false;
       return { syncedCount: allMutations.length, serverResponse: data };
     } catch (err) {
       serverAvailable = false;
       isSyncing = false;
+      emitSyncProgress({
+        phase: 'error',
+        current: 0,
+        total: 1,
+        message: `Sinkronisasi tertunda (${err.message}) — data tetap aman di IndexedDB.`
+      });
       return { syncedCount: 0, error: err.message };
     }
+  }
+
+  function startPollingFallback() {
+    if (pollTimer) clearInterval(pollTimer);
+    if (!isHttpOrigin()) return;
+    pollTimer = setInterval(async () => {
+      const st = window.ArbaStore ? window.ArbaStore.getState() : null;
+      if (!st || !st.isOnline || !st.currentUser || isSyncing) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      // Hanya poll jika ada antrean tertunda atau jika SSE tidak aktif (mis. di Vercel serverless)
+      if (st.offlineQueue && st.offlineQueue.length > 0) {
+        await flushOfflineQueue();
+        return;
+      }
+      const centralState = await fetchCentralState();
+      if (centralState && Number(centralState.stateVersion || 0) > Number(st.stateVersion || 0)) {
+        if (window.ArbaStore && typeof window.ArbaStore.applyServerState === 'function') {
+          window.ArbaStore.applyServerState(centralState, {
+            toastMessage: 'Sinkronisasi otomatis: Pembaruan data dari perangkat lain diterima.'
+          });
+        }
+      }
+    }, 10000);
   }
 
   // ---------------------------------------------------------------------------
@@ -669,6 +795,7 @@ window.ArbaOfflineSync = (function () {
         }
       }
       connectRealtimeSSE();
+      startPollingFallback();
     } else if (!st.isOnline) {
       // Jika cold-boot dalam keadaan offline, muat snapshot terakhir dari IndexedDB bila ada
       const snap = await loadSnapshotFromIDB();
@@ -691,10 +818,15 @@ window.ArbaOfflineSync = (function () {
       }
     }
     connectRealtimeSSE();
+    startPollingFallback();
   }
 
   async function clearAuthSession() {
     setAuthToken(null);
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
     if (sseConnection) {
       try { sseConnection.close(); } catch (e) {}
       sseConnection = null;
@@ -730,6 +862,8 @@ window.ArbaOfflineSync = (function () {
     return {
       clientId,
       serverAvailable,
+      serverStorageMode,
+      lastKnownServerVersion,
       isSyncing,
       lastSyncTimestamp,
       canInstallPWA: !!deferredInstallPrompt
