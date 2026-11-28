@@ -162,8 +162,39 @@ const SERVER_AUTH_SECRET = process.env.ARBA_AUTH_SECRET ||
   crypto.createHash('sha256').update('ARBA-SESSION-HMAC-2026:' + SERVER_STABLE_SEED).digest('hex');
 
 // Adapter Persistensi Cloud KV Opsional (Vercel KV / Upstash Redis REST API, zero-dependency)
-const CLOUD_KV_URL = (process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || '').replace(/\/+$/, '');
-const CLOUD_KV_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || '';
+// Mendukung nama variabel standar maupun yang memakai Custom Prefix dari Vercel Marketplace Storage
+function resolveCloudKvCredentials() {
+  const env = process.env || {};
+  if (env.KV_REST_API_URL && env.KV_REST_API_TOKEN) {
+    return { url: env.KV_REST_API_URL, token: env.KV_REST_API_TOKEN, envSource: 'KV_REST_API_*' };
+  }
+  if (env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN) {
+    return { url: env.UPSTASH_REDIS_REST_URL, token: env.UPSTASH_REDIS_REST_TOKEN, envSource: 'UPSTASH_REDIS_REST_*' };
+  }
+  const keys = Object.keys(env);
+  for (const k of keys) {
+    if (k.endsWith('_KV_REST_API_URL') && env[k]) {
+      const prefix = k.slice(0, -'_KV_REST_API_URL'.length);
+      const tokKey = prefix + '_KV_REST_API_TOKEN';
+      if (env[tokKey]) {
+        return { url: env[k], token: env[tokKey], envSource: prefix + '_KV_REST_API_*' };
+      }
+    }
+    if (k.endsWith('_UPSTASH_REDIS_REST_URL') && env[k]) {
+      const prefix = k.slice(0, -'_UPSTASH_REDIS_REST_URL'.length);
+      const tokKey = prefix + '_UPSTASH_REDIS_REST_TOKEN';
+      if (env[tokKey]) {
+        return { url: env[k], token: env[tokKey], envSource: prefix + '_UPSTASH_REDIS_REST_*' };
+      }
+    }
+  }
+  return { url: '', token: '', envSource: null };
+}
+
+const CLOUD_KV_CREDS = resolveCloudKvCredentials();
+const CLOUD_KV_URL = String(CLOUD_KV_CREDS.url || '').trim().replace(/\/+$/, '');
+const CLOUD_KV_TOKEN = String(CLOUD_KV_CREDS.token || '').trim();
+const CLOUD_KV_ENV_SOURCE = CLOUD_KV_CREDS.envSource;
 const HAS_CLOUD_KV = Boolean(CLOUD_KV_URL && CLOUD_KV_TOKEN && typeof fetch === 'function');
 const CLOUD_KV_STATE_KEY = 'arbaconnect:central_state:v3';
 const STORAGE_MODE = HAS_CLOUD_KV
@@ -173,9 +204,13 @@ const STORAGE_MODE = HAS_CLOUD_KV
 async function cloudKvGetState() {
   if (!HAS_CLOUD_KV) return null;
   try {
-    const res = await fetch(`${CLOUD_KV_URL}/get/${encodeURIComponent(CLOUD_KV_STATE_KEY)}`, {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${CLOUD_KV_TOKEN}` }
+    const res = await fetch(CLOUD_KV_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${CLOUD_KV_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(['GET', CLOUD_KV_STATE_KEY])
     });
     if (!res.ok) return null;
     const data = await res.json();
@@ -190,13 +225,13 @@ async function cloudKvGetState() {
 async function cloudKvSetState(stateObj) {
   if (!HAS_CLOUD_KV || !stateObj) return false;
   try {
-    const res = await fetch(`${CLOUD_KV_URL}/set/${encodeURIComponent(CLOUD_KV_STATE_KEY)}`, {
+    const res = await fetch(CLOUD_KV_URL, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${CLOUD_KV_TOKEN}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(stateObj)
+      body: JSON.stringify(['SET', CLOUD_KV_STATE_KEY, JSON.stringify(stateObj)])
     });
     return res.ok;
   } catch (err) {
@@ -2566,6 +2601,8 @@ const server = http.createServer(async (req, res) => {
         : (IS_SERVERLESS_RUNTIME ? 'Serverless Ephemeral SQLite (Hubungkan Vercel KV / Upstash Redis untuk persistensi lintas instance)' : 'Node.js Built-in SQLite Relational Engine (WAL Mode)'),
       storageMode: STORAGE_MODE,
       cloudKvConfigured: HAS_CLOUD_KV,
+      cloudKvEnvSource: CLOUD_KV_ENV_SOURCE,
+      detectedStorageEnvKeys: Object.keys(process.env || {}).filter((k) => /KV|UPSTASH|REDIS/i.test(k)),
       databaseFile: 'database/arbaconnect.sqlite',
       connectedClients: sseClients.size,
       relationalTables: counts,
