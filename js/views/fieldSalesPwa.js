@@ -217,26 +217,57 @@
               <span class="whitespace-nowrap">Omset: <b>${repPerf.revenuePct}%</b></span>
             </div>
 
-            ${(!isOnline || offlineQueue.length > 0) ? `
-              <!-- Offline-First Storage & Queue Status Banner -->
-              <div class="px-3.5 py-2.5 text-xs" style="background:#fffbeb; border-bottom:1px solid #fde68a; color:#78350f; padding:0.6rem 0.9rem;">
+            <!-- Single Offline & Sync Progress Banner (Tepat di bawah statistik kunjungan) -->
+            ${(!isOnline || offlineQueue.length > 0 || state.syncBannerMessage) ? `
+              <div id="pwa-sync-banner" class="px-3.5 py-2.5 text-xs" style="${
+                state.syncBannerPhase === 'success'
+                  ? 'background:#ecfdf5; border-bottom:1px solid #6ee7b7; color:#065f46;'
+                  : state.syncBannerPhase === 'error'
+                  ? 'background:#fff1f2; border-bottom:1px solid #fda4af; color:#9f1239;'
+                  : state.syncBannerPhase === 'syncing'
+                  ? 'background:#f0fdfa; border-bottom:1px solid #5eead4; color:#0f766e;'
+                  : 'background:#fffbeb; border-bottom:1px solid #fde68a; color:#78350f;'
+              } padding:0.6rem 0.9rem; position:relative; z-index:10;">
                 <div class="flex items-center justify-between gap-2">
-                  <div class="flex items-center gap-1.5 font-bold text-[11px]" style="color:#92400e;">
-                    <span class="material-symbols-outlined text-[16px]">cloud_off</span>
-                    <span>Mode Offline (${offlineQueue.length} antrean lokal)</span>
+                  <div class="flex items-center gap-1.5 font-bold text-[11px]">
+                    <span class="material-symbols-outlined text-[16px]">${
+                      state.syncBannerPhase === 'success' ? 'cloud_done'
+                      : state.syncBannerPhase === 'syncing' ? 'sync'
+                      : state.syncBannerPhase === 'error' ? 'sync_problem'
+                      : 'cloud_off'
+                    }</span>
+                    <span>${
+                      state.syncBannerPhase === 'syncing'
+                        ? 'Menyinkronkan ke Pusat...'
+                        : state.syncBannerPhase === 'success'
+                        ? 'Sinkronisasi Sukses!'
+                        : (!isOnline
+                          ? `Mode Offline (${offlineQueue.length} antrean lokal)`
+                          : `${offlineQueue.length} Antrean Lokal Menunggu Kirim`)
+                    }</span>
                   </div>
-                  <button
-                    type="button"
-                    id="btn-pwa-sync-now"
-                    class="px-2.5 py-1 rounded-md text-[10px] font-bold cursor-pointer border-0"
-                    style="background:#005c55; color:#fff; border-radius:6px; padding:0.25rem 0.6rem;"
-                  >
-                    Kirim ke Pusat (${offlineQueue.length})
-                  </button>
+                  ${state.syncBannerPhase !== 'success' ? `
+                    <button
+                      type="button"
+                      id="btn-pwa-sync-now"
+                      ${state.isManualSyncing ? 'disabled' : ''}
+                      class="px-2.5 py-1 rounded-md text-[10px] font-bold cursor-pointer border-0 disabled:opacity-60"
+                      style="background:#005c55; color:#fff; border-radius:6px; padding:0.3rem 0.65rem; position:relative; z-index:12; pointer-events:auto;"
+                    >
+                      ${state.isManualSyncing ? 'Mengirim...' : `Kirim ke Pusat (${offlineQueue.length})`}
+                    </button>
+                  ` : ''}
                 </div>
-                ${offlineQueue.length > 0 ? `
+                ${state.syncBannerPhase === 'syncing' || state.syncBannerPhase === 'success' ? `
+                  <div style="width:100%; height:4px; background:rgba(15,118,110,0.16); border-radius:999px; overflow:hidden; margin-top:6px;">
+                    <div style="height:100%; width:${state.syncBannerPhase === 'success' ? '100%' : '65%'}; background:#0f766e; border-radius:999px; transition:width 0.3s ease;"></div>
+                  </div>
+                ` : ''}
+                ${state.syncBannerMessage ? `
+                  <div class="mt-1 text-[10px] font-medium">${window.ArbaUtils.escapeHtml(state.syncBannerMessage)}</div>
+                ` : offlineQueue.length > 0 ? `
                   <div class="mt-1.5 text-[10px] space-y-0.5" style="color:#92400e;">
-                    <div><b>${offlineQueue.length} transaksi</b> tersimpan aman di memori HP &amp; siap dikirim saat online:</div>
+                    <div><b>${offlineQueue.length} transaksi</b> tersimpan aman di memori HP &amp; siap dikirim:</div>
                     ${offlineQueue.slice(0, 3).map(function (q) {
                       return `<div class="truncate">• ${window.ArbaUtils.escapeHtml(q.summary || ('Order #' + q.id))}</div>`;
                     }).join('')}
@@ -960,11 +991,46 @@
       });
     }
 
-    // Sync Now button inside Offline Banner
+    // Sync Now button inside Offline Banner (selalu responsif + feedback progres & error)
     var btnSyncNow = container.querySelector('#btn-pwa-sync-now');
     if (btnSyncNow) {
-      btnSyncNow.addEventListener('click', function () {
-        window.ArbaStore.syncNow();
+      btnSyncNow.addEventListener('click', async function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (state.isManualSyncing) return;
+        state.isManualSyncing = true;
+        state.syncBannerPhase = 'syncing';
+        state.syncBannerMessage = 'Mengirim antrean lokal ke Server Pusat...';
+        renderFieldSalesPwa(container);
+        try {
+          var res = await window.ArbaStore.syncNow();
+          state.isManualSyncing = false;
+          if (res && res.error) {
+            state.syncBannerPhase = 'error';
+            state.syncBannerMessage = res.error;
+          } else if (res && res.offline) {
+            state.syncBannerPhase = 'offline';
+            state.syncBannerMessage = 'Perangkat belum terhubung ke internet.';
+          } else {
+            state.syncBannerPhase = 'success';
+            state.syncBannerMessage = (res && res.syncedCount > 0)
+              ? 'Berhasil mengirim ' + res.syncedCount + ' transaksi ke Database Pusat!'
+              : 'Data sudah sinkron dengan Server Pusat.';
+            setTimeout(function () {
+              state.syncBannerPhase = null;
+              state.syncBannerMessage = null;
+              var mainC = document.getElementById('main-view-container');
+              if (mainC && window.ArbaStore.getState().currentPath === 'field-sales-pwa-preview') {
+                renderFieldSalesPwa(mainC);
+              }
+            }, 3500);
+          }
+        } catch (err) {
+          state.isManualSyncing = false;
+          state.syncBannerPhase = 'error';
+          state.syncBannerMessage = err && err.message ? err.message : 'Gagal mengirim data ke pusat.';
+        }
+        renderFieldSalesPwa(container);
       });
     }
 

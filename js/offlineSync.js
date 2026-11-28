@@ -406,7 +406,12 @@ window.ArbaOfflineSync = (function () {
    */
   async function flushOfflineQueue(options) {
     options = options || {};
-    if (isSyncing) return { syncedCount: 0, busy: true };
+    if (isSyncing) {
+      if (options.manual && window.ArbaStore && typeof window.ArbaStore.showToast === 'function') {
+        window.ArbaStore.showToast('Sinkronisasi sedang berjalan, mohon tunggu sebentar...', 'sync');
+      }
+      return { syncedCount: 0, busy: true };
+    }
     isSyncing = true;
 
     try {
@@ -467,7 +472,17 @@ window.ArbaOfflineSync = (function () {
         })
       });
 
-      if (!res.ok) throw new Error('Server merespons ' + res.status);
+      if (!res.ok) {
+        let serverErrMsg = 'Server merespons ' + res.status;
+        try {
+          const errJson = await res.json();
+          if (errJson && errJson.message) serverErrMsg = errJson.message;
+        } catch (e) {}
+        if (res.status === 401) {
+          serverErrMsg = 'Sesi login kedaluwarsa (401) — silakan Logout & Login ulang untuk mengirim antrean.';
+        }
+        throw new Error(serverErrMsg);
+      }
       const data = await res.json();
       serverAvailable = true;
       lastSyncTimestamp = Date.now();
@@ -494,6 +509,12 @@ window.ArbaOfflineSync = (function () {
             ? `Sinkronisasi sukses! ${allMutations.length} transaksi lokal telah terintegrasi ke Database Pusat.`
             : (options.showToastIfEmpty ? 'Sinkronisasi sukses: Data telah mutakhir dengan Server Pusat.' : null)
         });
+      } else if (window.ArbaStore && allMutations.length > 0) {
+        // Pastikan antrean lokal dibersihkan meski server state tidak menimpa lokal
+        const stNow = window.ArbaStore.getState();
+        stNow.offlineQueue = [];
+        window.ArbaStore.showToast(`Sinkronisasi sukses! ${allMutations.length} transaksi lokal telah dikirim ke pusat.`, 'cloud_done');
+        window.ArbaStore.notify();
       }
 
       emitSyncProgress({
@@ -514,8 +535,11 @@ window.ArbaOfflineSync = (function () {
         phase: 'error',
         current: 0,
         total: 1,
-        message: `Sinkronisasi tertunda (${err.message}) — data tetap aman di IndexedDB.`
+        message: `Gagal kirim: ${err.message}`
       });
+      if (options.manual && window.ArbaStore && typeof window.ArbaStore.showToast === 'function') {
+        window.ArbaStore.showToast(`Gagal mengirim ke pusat: ${err.message}`, 'sync_problem');
+      }
       return { syncedCount: 0, error: err.message };
     }
   }

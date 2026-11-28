@@ -953,26 +953,26 @@ window.ArbaStore = (function() {
       });
       const count = state.offlineQueue.length;
       if (window.ArbaOfflineSync && typeof window.ArbaOfflineSync.flushOfflineQueue === 'function') {
-        window.ArbaOfflineSync.flushOfflineQueue();
+        window.ArbaOfflineSync.flushOfflineQueue({ manual: Boolean(opts.manual) });
         window.ArbaOfflineSync.connectRealtimeSSE();
       } else {
         state.offlineQueue = [];
+        showToast(
+          `Online kembali: ${count} transaksi lokal dikirim ke Server Pusat & stok dipotong otomatis` +
+          (waiting ? ` (${waiting} menunggu stok)` : '') + '.' + lowStockMessage(lowHits),
+          'cloud_done'
+        );
       }
-      showToast(
-        `Online kembali: ${count} transaksi lokal dikirim ke Server Pusat & stok dipotong otomatis` +
-        (waiting ? ` (${waiting} menunggu stok)` : '') + '.' + lowStockMessage(lowHits),
-        'cloud_done'
-      );
     } else {
       if (state.isOnline && window.ArbaOfflineSync) {
-        window.ArbaOfflineSync.flushOfflineQueue();
+        window.ArbaOfflineSync.flushOfflineQueue({ manual: Boolean(opts.manual), showToastIfEmpty: Boolean(opts.manual) });
         window.ArbaOfflineSync.connectRealtimeSSE();
       }
       showToast(
         state.isOnline
-          ? (opts.fromBrowserEvent ? 'Sinyal internet terhubung kembali — sinkronisasi pusat aktif' : 'Status: Online - Terhubung ke Database Pusat secara real-time')
+          ? (opts.fromBrowserEvent ? 'Sinyal internet terhubung kembali — sinkronisasi pusat aktif' : 'Status: Online - Menghubungkan ke Database Pusat...')
           : (opts.fromBrowserEvent ? 'Koneksi terputus — otomatis beralih ke penyimpanan lokal (IndexedDB)' : 'Status: Offline - Transaksi disimpan di IndexedDB & LocalStorage lokal'),
-        state.isOnline ? 'cloud_done' : 'cloud_off'
+        state.isOnline ? 'cloud_sync' : 'cloud_off'
       );
     }
     notify();
@@ -983,13 +983,24 @@ window.ArbaStore = (function() {
   }
 
   async function syncNow() {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      state.isOnline = false;
+      showToast('Perangkat sedang offline (tidak ada sinyal internet). Antrean tetap tersimpan aman di lokal.', 'cloud_off');
+      notify();
+      return { syncedCount: 0, offline: true };
+    }
     if (!state.isOnline) {
-      setNetworkOnlineState(true, { force: true });
-      return;
+      state.isOnline = true;
+      notify();
     }
     if (window.ArbaOfflineSync && typeof window.ArbaOfflineSync.flushOfflineQueue === 'function') {
-      await window.ArbaOfflineSync.flushOfflineQueue({ showToastIfEmpty: true });
+      const result = await window.ArbaOfflineSync.flushOfflineQueue({ showToastIfEmpty: true, manual: true });
+      if (window.ArbaOfflineSync.connectRealtimeSSE) {
+        window.ArbaOfflineSync.connectRealtimeSSE();
+      }
+      return result;
     }
+    return { syncedCount: 0 };
   }
 
   function setSelectedOutletId(id) {

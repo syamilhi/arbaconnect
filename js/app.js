@@ -13,7 +13,7 @@
       if (typeof window !== 'undefined' && 'caches' in window) {
         window.caches.keys().then(function (keys) {
           keys.forEach(function (k) {
-            if (k.indexOf('arbaconnect-pwa-') === 0 && k !== 'arbaconnect-pwa-v30') {
+            if (k.indexOf('arbaconnect-pwa-') === 0 && k !== 'arbaconnect-pwa-v31') {
               window.caches.delete(k);
             }
           });
@@ -813,8 +813,9 @@
     },
 
     syncOfflineBannerFromState: function (state) {
-      if (!state || !state.currentUser) {
-        var b = document.getElementById('global-sync-status-banner');
+      var b = document.getElementById('global-sync-status-banner');
+      // Di halaman Field Sales PWA sudah ada 1 banner khusus di bawah statistik kunjungan — hindari double alert
+      if (!state || !state.currentUser || state.currentPath === 'field-sales-pwa-preview') {
         if (b) b.classList.add('hidden');
         return;
       }
@@ -835,8 +836,7 @@
           message: qLen + ' transaksi lokal menunggu sinkronisasi ke Server Pusat.'
         });
       } else if (this._lastSyncPhase === 'offline') {
-        var banner = document.getElementById('global-sync-status-banner');
-        if (banner) banner.classList.add('hidden');
+        if (b) b.classList.add('hidden');
         this._lastSyncPhase = 'idle';
       }
     },
@@ -852,7 +852,7 @@
       if (!banner || !msgEl) return;
 
       var st = window.ArbaStore ? window.ArbaStore.getState() : null;
-      if (!st || !st.currentUser) {
+      if (!st || !st.currentUser || st.currentPath === 'field-sales-pwa-preview') {
         banner.classList.add('hidden');
         return;
       }
