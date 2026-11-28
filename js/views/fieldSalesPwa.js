@@ -15,96 +15,6 @@
 
   window.ArbaViews = window.ArbaViews || {};
 
-  var MAP_CACHE_NAME = 'arbaconnect-map-tiles-v1';
-  var MAP_META_KEY = 'arbaconnect_offline_map_meta';
-
-  function loadOfflineMapMeta() {
-    try {
-      var raw = localStorage.getItem(MAP_META_KEY);
-      return raw ? JSON.parse(raw) : { tilesCached: 0, updatedAt: null };
-    } catch (e) {
-      return { tilesCached: 0, updatedAt: null };
-    }
-  }
-
-  function saveOfflineMapMeta(meta) {
-    try {
-      localStorage.setItem(MAP_META_KEY, JSON.stringify(meta));
-    } catch (e) {}
-  }
-
-  function latLngToTile(lat, lng, zoom) {
-    var latRad = (lat * Math.PI) / 180;
-    var n = Math.pow(2, zoom);
-    var x = Math.floor(((lng + 180) / 360) * n);
-    var y = Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n);
-    return { x: x, y: y };
-  }
-
-  function computeBearingText(lat1, lng1, lat2, lng2) {
-    var dLon = ((lng2 - lng1) * Math.PI) / 180;
-    var y = Math.sin(dLon) * Math.cos((lat2 * Math.PI) / 180);
-    var x =
-      Math.cos((lat1 * Math.PI) / 180) * Math.sin((lat2 * Math.PI) / 180) -
-      Math.sin((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.cos(dLon);
-    var deg = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
-    var dirs = ['Utara', 'Timur Laut', 'Timur', 'Tenggara', 'Selatan', 'Barat Daya', 'Barat', 'Barat Laut'];
-    return { deg: Math.round(deg), label: dirs[Math.round(deg / 45) % 8] };
-  }
-
-  function renderOfflineRadarSvg(targetLat, targetLng, outletName, userLat, userLng) {
-    var hasUser = typeof userLat === 'number' && typeof userLng === 'number' && !isNaN(userLat) && !isNaN(userLng);
-    var distM = null;
-    var bearing = { deg: 0, label: 'Tepat di Lokasi' };
-    var ux = 160;
-    var uy = 65;
-
-    if (hasUser) {
-      var km = window.ArbaStore && window.ArbaStore.haversineKm
-        ? window.ArbaStore.haversineKm(userLat, userLng, targetLat, targetLng)
-        : 0.015;
-      distM = Math.round(km * 1000);
-      bearing = computeBearingText(userLat, userLng, targetLat, targetLng);
-      var rad = ((bearing.deg + 180) * Math.PI) / 180;
-      var pxDist = Math.min(46, Math.max(10, (distM / 120) * 46));
-      ux = Math.round(160 + Math.sin(rad) * pxDist);
-      uy = Math.round(65 - Math.cos(rad) * pxDist);
-    }
-
-    var distLabel = distM === null
-      ? 'GPS Offline Siap (Klik Check-in Lokasi)'
-      : (distM < 1000 ? distM + ' m ke ' + bearing.label : (distM / 1000).toFixed(2) + ' km ke ' + bearing.label);
-
-    return `
-      <div style="width:100%; height:130px; background:linear-gradient(135deg,#0f2f2c 0%,#064e3b 100%); position:relative; overflow:hidden; display:flex; align-items:center; justify-content:center;">
-        <svg viewBox="0 0 320 130" style="width:100%; height:100%; display:block;" aria-label="Peta Radar GPS Offline">
-          <defs>
-            <pattern id="arbaOfflineGrid" width="20" height="20" patternUnits="userSpaceOnUse">
-              <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(167,243,208,0.12)" stroke-width="0.8"/>
-            </pattern>
-          </defs>
-          <rect width="320" height="130" fill="url(#arbaOfflineGrid)" />
-          <circle cx="160" cy="65" r="52" fill="none" stroke="rgba(110,231,183,0.22)" stroke-dasharray="3 3" stroke-width="1"/>
-          <circle cx="160" cy="65" r="28" fill="rgba(16,185,129,0.16)" stroke="#34d399" stroke-width="1.3"/>
-          ${hasUser ? `
-            <line x1="${ux}" y1="${uy}" x2="160" y2="65" stroke="#fde047" stroke-width="1.6" stroke-dasharray="3 2"/>
-            <circle cx="${ux}" cy="${uy}" r="5" fill="#38bdf8" stroke="#ffffff" stroke-width="1.5"/>
-          ` : ''}
-          <circle cx="160" cy="65" r="6" fill="#10b981" stroke="#ffffff" stroke-width="2"/>
-          <text x="160" y="16" text-anchor="middle" fill="#a7f3d0" font-size="9" font-weight="700" font-family="sans-serif">
-            MODE PETA RADAR GPS OFFLINE (GEOFENCE 50M)
-          </text>
-          <text x="160" y="118" text-anchor="middle" fill="#fef08a" font-size="9.5" font-weight="700" font-family="sans-serif">
-            ${window.ArbaUtils.escapeHtml(distLabel)}
-          </text>
-        </svg>
-        <div style="position:absolute; left:8px; bottom:6px; font-size:9px; color:#d1fae5; background:rgba(0,0,0,0.35); padding:1px 5px; border-radius:4px;">
-          ${window.ArbaUtils.escapeHtml(outletName)}
-        </div>
-      </div>
-    `;
-  }
-
   var state = {
     isPhoneFrame: false,
     activePwaTab: 'outlet',
@@ -123,12 +33,7 @@
     isSubmitting: false,
     gpsCheckedIn: true,
     gpsDistance: 12,
-    checkinTime: '10:15 WIB',
-    forceRadarMode: false,
-    isDownloadingMap: false,
-    mapDownloadProgress: '',
-    lastUserLat: null,
-    lastUserLng: null
+    checkinTime: '10:15 WIB'
   };
 
   function renderFieldSalesPwa(container) {
@@ -453,12 +358,10 @@
                   </div>
                 </div>
 
-                <!-- Peta Lokasi Nyata Geofence GPS Apotek Target (Leaflet + Pre-Cache Offline + Fallback Radar GPS) -->
+                <!-- Peta Lokasi Nyata Geofence GPS Apotek Target (Leaflet + OpenStreetMap) -->
                 ${(function () {
                   var coords = window.ArbaStore.getOutletCoordinates ? window.ArbaStore.getOutletCoordinates(currentOutlet) : { lat: currentOutlet.lat || -7.5682, lng: currentOutlet.lng || 110.8091 };
                   var gmapsUrl = 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(coords.lat + ',' + coords.lng) + '&travelmode=driving';
-                  var mapMeta = loadOfflineMapMeta();
-                  var showRadarNow = state.forceRadarMode || (typeof window.L === 'undefined');
                   return `
                     <div class="rounded-lg overflow-hidden border border-slate-200 bg-white mt-1.5" style="border:1px solid #cbd5e1; border-radius:10px;">
                       <div class="px-2.5 py-1.5 flex items-center justify-between text-[10px] bg-slate-100 border-b border-slate-200" style="background:#f1f5f9; border-bottom:1px solid #e2e8f0;">
@@ -471,48 +374,14 @@
                           <span>Navigasi Google Maps</span>
                         </a>
                       </div>
-                      <div style="position:relative; width:100%; height:130px; background:#e2e8f0;">
-                        ${showRadarNow ? renderOfflineRadarSvg(coords.lat, coords.lng, currentOutlet.name, state.lastUserLat, state.lastUserLng) : `
-                          <div
-                            id="pwa-checkin-leaflet-map"
-                            data-lat="${coords.lat}"
-                            data-lng="${coords.lng}"
-                            data-name="${window.ArbaUtils.escapeHtml(currentOutlet.name)}"
-                            data-addr="${window.ArbaUtils.escapeHtml(currentOutlet.address + ', ' + currentOutlet.cityName)}"
-                            style="width:100%; height:130px; z-index:1; background:#e2e8f0;"
-                          ></div>
-                        `}
-                        <div id="pwa-offline-radar-overlay" style="display:none; position:absolute; inset:0; z-index:10;">
-                          ${renderOfflineRadarSvg(coords.lat, coords.lng, currentOutlet.name, state.lastUserLat, state.lastUserLng)}
-                        </div>
-                      </div>
-                      <div class="px-2.5 py-1.5 flex items-center justify-between gap-1.5 text-[10px] bg-slate-50 border-t border-slate-200" style="background:#f8fafc; border-top:1px solid #e2e8f0;">
-                        <button
-                          type="button"
-                          id="btn-pwa-download-offline-map"
-                          ${state.isDownloadingMap ? 'disabled' : ''}
-                          class="inline-flex items-center gap-1 px-2 py-0.5 rounded font-bold cursor-pointer border-0 disabled:opacity-60"
-                          style="background:#e6f4f2; color:#005c55;"
-                          title="Simpan tile peta seluruh outlet rute ke memori HP agar tampil 100% offline"
-                        >
-                          <span class="material-symbols-outlined text-[13px]">download_for_offline</span>
-                          <span>${
-                            state.isDownloadingMap
-                              ? (state.mapDownloadProgress || 'Mengunduh Peta...')
-                              : (mapMeta.tilesCached > 0 ? `Peta Offline (${mapMeta.tilesCached} tile)` : 'Unduh Peta Offline')
-                          }</span>
-                        </button>
-                        <button
-                          type="button"
-                          id="btn-pwa-toggle-radar"
-                          class="inline-flex items-center gap-1 px-2 py-0.5 rounded font-semibold cursor-pointer border-0"
-                          style="background:#f1f5f9; color:#334155;"
-                          title="Ganti antara Peta Jalan OSM dan Radar GPS Offline"
-                        >
-                          <span class="material-symbols-outlined text-[13px]">${state.forceRadarMode ? 'map' : 'radar'}</span>
-                          <span>${state.forceRadarMode ? 'Peta OSM' : 'Radar GPS'}</span>
-                        </button>
-                      </div>
+                      <div
+                        id="pwa-checkin-leaflet-map"
+                        data-lat="${coords.lat}"
+                        data-lng="${coords.lng}"
+                        data-name="${window.ArbaUtils.escapeHtml(currentOutlet.name)}"
+                        data-addr="${window.ArbaUtils.escapeHtml(currentOutlet.address + ', ' + currentOutlet.cityName)}"
+                        style="width:100%; height:130px; z-index:1; background:#e2e8f0;"
+                      ></div>
                     </div>
                   `;
                 })()}
@@ -846,7 +715,6 @@
 
     // Inisialisasi Peta Nyata Geofence GPS Apotek Target di PWA Sales
     var pwaMapEl = container.querySelector('#pwa-checkin-leaflet-map');
-    var radarOverlay = container.querySelector('#pwa-offline-radar-overlay');
     if (pwaMapEl && typeof window.L !== 'undefined') {
       try {
         if (window.__arbaPwaCheckinMap) {
@@ -862,25 +730,10 @@
           zoomControl: false
         });
         window.__arbaPwaCheckinMap = pMap;
-        var tileErrorCount = 0;
-        var tileSuccessCount = 0;
-        // Gunakan host tunggal tile.openstreetmap.org agar 100% cocok dengan cache offline Service Worker
-        var osmLayer = window.L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          maxZoom: 18,
+        window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
           attribution: '&copy; OSM'
-        });
-        osmLayer.on('tileload', function () {
-          tileSuccessCount++;
-          if (radarOverlay) radarOverlay.style.display = 'none';
-        });
-        osmLayer.on('tileerror', function () {
-          tileErrorCount++;
-          // Jika offline & tile area ini belum sempat di-cache, aktifkan fallback Radar GPS Offline otomatis
-          if (tileSuccessCount === 0 && tileErrorCount >= 2 && radarOverlay) {
-            radarOverlay.style.display = 'block';
-          }
-        });
-        osmLayer.addTo(pMap);
+        }).addTo(pMap);
 
         // Radius Geofence 50m di sekitar titik Apotek
         window.L.circle([pLat, pLng], {
@@ -901,92 +754,7 @@
           .addTo(pMap)
           .bindPopup('<div style="font-size:11px;font-weight:700;">' + window.ArbaUtils.escapeHtml(pName) + '</div>');
         setTimeout(function () { pMap.invalidateSize(); }, 80);
-      } catch (err) {
-        if (radarOverlay) radarOverlay.style.display = 'block';
-      }
-    }
-
-    // Toggle Peta OSM <-> Radar GPS Offline
-    var btnToggleRadar = container.querySelector('#btn-pwa-toggle-radar');
-    if (btnToggleRadar) {
-      btnToggleRadar.addEventListener('click', function () {
-        state.forceRadarMode = !state.forceRadarMode;
-        renderFieldSalesPwa(container);
-      });
-    }
-
-    // Pre-Cache Tile Peta Offline untuk seluruh outlet rute (Zoom 15 & 16)
-    var btnDownloadMap = container.querySelector('#btn-pwa-download-offline-map');
-    if (btnDownloadMap) {
-      btnDownloadMap.addEventListener('click', async function () {
-        if (state.isDownloadingMap) return;
-        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-          window.ArbaApp.showToast('Sambungkan internet sebentar untuk mengunduh peta offline area Solo Raya.', 'cloud_off');
-          return;
-        }
-        if (typeof caches === 'undefined') {
-          window.ArbaApp.showToast('Browser tidak mendukung Cache Storage untuk peta offline.', 'warning');
-          return;
-        }
-        state.isDownloadingMap = true;
-        state.mapDownloadProgress = 'Menyiapkan...';
-        renderFieldSalesPwa(container);
-
-        try {
-          var allOutlets = window.ArbaStore.getState().outlets || [];
-          var tileUrlSet = new Set();
-          allOutlets.forEach(function (o) {
-            var c = window.ArbaStore.getOutletCoordinates ? window.ArbaStore.getOutletCoordinates(o) : { lat: o.lat || -7.5682, lng: o.lng || 110.8091 };
-            [15, 16].forEach(function (z) {
-              var center = latLngToTile(c.lat, c.lng, z);
-              for (var dx = -1; dx <= 1; dx++) {
-                for (var dy = -1; dy <= 1; dy++) {
-                  tileUrlSet.add('https://tile.openstreetmap.org/' + z + '/' + (center.x + dx) + '/' + (center.y + dy) + '.png');
-                }
-              }
-            });
-          });
-
-          var urls = Array.from(tileUrlSet);
-          var cache = await caches.open(MAP_CACHE_NAME);
-          var doneCount = 0;
-          var savedCount = 0;
-          var batchSize = 6;
-
-          for (var i = 0; i < urls.length; i += batchSize) {
-            var batch = urls.slice(i, i + batchSize);
-            await Promise.all(batch.map(async function (tileUrl) {
-              try {
-                var existing = await cache.match(tileUrl);
-                if (existing) {
-                  savedCount++;
-                } else {
-                  var resp = await fetch(tileUrl, { mode: 'no-cors' });
-                  if (resp) {
-                    await cache.put(tileUrl, resp);
-                    savedCount++;
-                  }
-                }
-              } catch (e) {}
-              doneCount++;
-            }));
-            state.mapDownloadProgress = 'Mengunduh ' + doneCount + '/' + urls.length + ' tile...';
-            var btnNow = container.querySelector('#btn-pwa-download-offline-map span:last-child');
-            if (btnNow) btnNow.textContent = state.mapDownloadProgress;
-          }
-
-          saveOfflineMapMeta({ tilesCached: savedCount, updatedAt: Date.now() });
-          state.isDownloadingMap = false;
-          state.mapDownloadProgress = '';
-          window.ArbaApp.showToast('Peta offline siap! ' + savedCount + ' tile peta Solo Raya tersimpan di memori HP.', 'download_done');
-          renderFieldSalesPwa(container);
-        } catch (err) {
-          state.isDownloadingMap = false;
-          state.mapDownloadProgress = '';
-          window.ArbaApp.showToast('Gagal mengunduh peta offline: ' + err.message, 'warning');
-          renderFieldSalesPwa(container);
-        }
-      });
+      } catch (err) {}
     }
 
     // 2-Tab switcher (Outlet | Order)
@@ -1290,8 +1058,6 @@
             function (pos) {
               var lat = pos.coords.latitude;
               var lng = pos.coords.longitude;
-              state.lastUserLat = lat;
-              state.lastUserLng = lng;
               var realKm = window.ArbaStore.haversineKm
                 ? window.ArbaStore.haversineKm(lat, lng, targetCoords.lat, targetCoords.lng)
                 : 0.012;

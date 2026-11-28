@@ -8,7 +8,7 @@
  * 3. API Pusat (/api/*): Network-Only (dikelola oleh OfflineSync Queue + IndexedDB di sisi aplikasi).
  */
 
-const CACHE_VERSION = 'arbaconnect-pwa-v32';
+const CACHE_VERSION = 'arbaconnect-pwa-v31';
 const FONT_CACHE = 'arbaconnect-fonts-v1';
 const MAP_CACHE = 'arbaconnect-map-tiles-v1';
 
@@ -93,9 +93,9 @@ self.addEventListener('fetch', (event) => {
     const targetCache = url.hostname.endsWith('tile.openstreetmap.org') ? MAP_CACHE : FONT_CACHE;
     event.respondWith(
       caches.open(targetCache).then((cache) => {
-        return cache.match(req, { ignoreSearch: true }).then((cached) => {
+        return cache.match(req).then((cached) => {
           const networkFetch = fetch(req).then((res) => {
-            if (res && (res.status === 200 || res.type === 'opaque')) {
+            if (res && res.status === 200) {
               cache.put(req, res.clone());
             }
             return res;
